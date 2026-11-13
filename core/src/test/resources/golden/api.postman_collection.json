@@ -1,0 +1,98 @@
+{
+  "info": {
+    "name": "api",
+    "_postman_id": "00000000-0000-4000-8000-000000000002",
+    "description": "Exported by RequestHandoff 0.1.0 from JetBrains HTTP Client files.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "health",
+      "item": [
+        {
+          "name": "GET {{host}}/health",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{host}}/health",
+              "host": [
+                "{{host}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "users",
+      "item": [
+        {
+          "name": "create",
+          "item": [
+            {
+              "name": "Create user",
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// RequestHandoff v0.1.0 does not translate HTTP Client scripts.",
+                      "// Original pre-request script:",
+                      "// request.variables.set(\"name\", \"Ada\");"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "X-REQUEST-TYPE",
+                    "value": "GraphQL"
+                  }
+                ],
+                "body": {
+                  "mode": "graphql",
+                  "graphql": {
+                    "query": "mutation {\n  create(name: \"{{name}}\") { id }\n}",
+                    "variables": "{\n  \"name\": \"{{name}}\"\n}"
+                  }
+                },
+                "url": {
+                  "raw": "{{host}}/users",
+                  "host": [
+                    "{{host}}"
+                  ],
+                  "path": [
+                    "users"
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "host",
+      "value": "https://example.com",
+      "type": "string"
+    }
+  ]
+}
