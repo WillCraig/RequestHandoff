@@ -1,0 +1,2 @@
+Vendored for offline tests from https://schema.postman.com/json/collection/v2.1.0/collection.json
+Postman Collection Format v2.1 schema. Postman is a trademark of Postman, Inc.
