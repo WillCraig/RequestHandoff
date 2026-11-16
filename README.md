@@ -41,9 +41,9 @@ To try it from sources:
 
 A single file becomes a collection whose requests sit at the top level. A folder becomes a collection of the same name: directories and request files become folders, and the requests inside each file stay in file order.
 
-The closest `http-client.env.json` between the selection and the project root is used. `http-client.private.env.json` is detected the same way, but its contents are not read unless you enable private values. Nested environment objects are flattened with dotted names (`auth.user`). Values that come from the private file are marked `secret` in the Postman environment.
+The closest `http-client.env.json` between the selection and the project root is used. `http-client.private.env.json` is detected the same way, but its contents are not read unless you enable private values. Nested environment objects are flattened with dotted names (`auth.user`). Values that come from the private file are marked `secret` in the Postman environment. Dynamic variables inside environment values are rewritten the same way as in requests. The report lists unmapped tokens and does not print environment values.
 
-`{{var}}` placeholders are kept as Postman variables. File-level `@name = value` lines become collection variables.
+`{{var}}` placeholders are kept as Postman variables. File-level `@name = value` lines become collection variables. Dynamic variables are rewritten when Postman has an equivalent (`{{$uuid}}` becomes `{{$guid}}`). `{{$env.NAME}}`, `{{$processEnv NAME}}`, and `{{$dotenv NAME}}` become `{{NAME}}`. The value on this machine is not copied.
 
 ## Mapping
 
@@ -53,7 +53,12 @@ The closest `http-client.env.json` between the selection and the project root is
 | Method and URL | `request.method` and `url`, with the query string in `url.query`. `GRAPHQL` is sent as `POST`. |
 | Header lines | `request.header`. `Authorization` stays a header. |
 | `{{var}}` | Left as a Postman `{{var}}`. |
-| `@var = value` | Collection variable. |
+| `{{$uuid}}`, `{{$random.uuid}}` | `{{$guid}}`. Postman also documents `{{$randomUUID}}`; both are UUID values, and the export uses `{{$guid}}` because that entry is specified as uuid-v4. |
+| `{{$timestamp}}`, `{{$isoTimestamp}}`, `{{$randomInt}}` | The same names. |
+| `{{$random.integer}}` | `{{$randomInt}}`. With `(from, to)`, the HTTP Client range is not applied. Postman `$randomInt` is always an integer from 0 to 1000, and the report says so. |
+| `{{$random.email}}` and other `$random.*` helpers with a Postman equivalent | The matching `{{$random…}}` variable. Helpers with no equivalent, including `$random.alphabetic(length)`, `$random.alphanumeric(length)`, `$random.hexadecimal(length)`, `$random.float`, and `$exampleServer`, are left unchanged and listed in the report. |
+| `{{$env.NAME}}`, `{{$processEnv NAME}}`, `{{$dotenv NAME}}` | `{{NAME}}`. The host or dotenv value is not read. |
+| `@var = value` | Collection variable. Dynamic variables in the value are rewritten the same way. |
 | JSON, XML, HTML, and other text bodies | `body.mode = raw` with a language hint. |
 | `application/x-www-form-urlencoded` | `body.mode = urlencoded`. |
 | Multipart text parts | `formdata` text fields. |
@@ -68,7 +73,7 @@ v0.1 does not translate everything. The export report states these limits for ev
 - Response-handler scripts (`> {% %}` and `> ./script.js`) and pre-request scripts (`< {% %}` and `< ./script.js`) are **not** translated. Inline scripts are copied into the collection as commented-out script text. Script files are named in those comments and are not inlined.
 - WebSocket and gRPC requests are skipped, with a warning in the report.
 - `Authorization` headers are copied as headers. Postman auth objects are not created.
-- Dynamic variables such as `{{$uuid}}` are left unchanged.
+- Dynamic variables with no Postman equivalent are left unchanged. `{{$random.integer(from, to)}}` becomes `{{$randomInt}}` and loses its range. Host environment variables are not read.
 - `run` imports, response redirects (`>>`), saved response examples, and request flags such as `@no-log` are listed in the report and are not converted.
 - Private environment values are never written unless you explicitly enable them for that export. The report does not print those values.
 
@@ -78,7 +83,6 @@ Not in this version:
 
 - Script translation from `client.*` to `pm.*`
 - Postman auth objects
-- Dynamic variables (`$uuid` to `$guid`, and the rest)
 - Marketplace signing and publishing
 - Import-back / round-trip notes
 
