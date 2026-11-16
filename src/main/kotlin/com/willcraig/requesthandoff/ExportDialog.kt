@@ -18,7 +18,7 @@ import javax.swing.JButton
 import javax.swing.JComponent
 import javax.swing.JPanel
 
-class ExportDialog(
+open class ExportDialog(
     private val project: Project,
     suggestedDirectory: String?,
 ) : DialogWrapper(project) {

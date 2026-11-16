@@ -1,0 +1,77 @@
+# Kitchen-sink HTTP Client sample
+// Comments above the first request are kept out of the collection.
+
+@host = https://example.com
+@token = file-token
+
+### List items
+# comment inside the request
+# @no-log
+GET {{host}}/items?active=true
+    &page=2
+Authorization: Bearer {{token}}
+Accept: application/json
+
+### Create item
+# @name createItem
+POST {{host}}/items HTTP/1.1
+Content-Type: application/json
+
+{
+  "name": "Ada",
+  "note": "line one
+still the same string"
+}
+
+### Form
+POST {{host}}/form
+Content-Type: application/x-www-form-urlencoded
+
+name=Ada&role={{role}}
+
+### Upload
+POST {{host}}/upload
+Content-Type: multipart/form-data; boundary=Boundary
+
+--Boundary
+Content-Disposition: form-data; name="title"
+
+Hello
+--Boundary
+Content-Disposition: form-data; name="file"; filename="notes.txt"
+Content-Type: text/plain
+
+< ./notes.txt
+--Boundary--
+
+### Raw file
+POST {{host}}/raw
+Content-Type: application/octet-stream
+
+< ./payload.bin
+
+### Graph
+< {%
+request.variables.set("userId", "1");
+%}
+GRAPHQL {{host}}/graphql
+Authorization: Bearer {{token}}
+
+query {
+  ping
+}
+
+{
+  "id": "{{userId}}"
+}
+
+> ./check.js
+
+### Generated
+GET {{host}}/id/{{$uuid}}
+
+### Socket
+WEBSOCKET wss://example.com/live
+
+### Rpc
+GRPC localhost:50051/demo.Greeter/SayHello

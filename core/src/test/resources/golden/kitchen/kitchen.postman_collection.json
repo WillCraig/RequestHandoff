@@ -1,0 +1,287 @@
+{
+  "info": {
+    "name": "kitchen",
+    "_postman_id": "00000000-0000-4000-8000-000000000002",
+    "description": "Exported by RequestHandoff 0.1.0 from JetBrains HTTP Client files.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "extra",
+      "item": [
+        {
+          "name": "Ping",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Trace",
+                "value": "{{trace}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{host}}/ping",
+              "host": [
+                "{{host}}"
+              ],
+              "path": [
+                "ping"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "requests",
+      "item": [
+        {
+          "name": "List items",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{host}}/items?active=true&page=2",
+              "host": [
+                "{{host}}"
+              ],
+              "path": [
+                "items"
+              ],
+              "query": [
+                {
+                  "key": "active",
+                  "value": "true"
+                },
+                {
+                  "key": "page",
+                  "value": "2"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create item",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Ada\",\n  \"note\": \"line one\nstill the same string\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{host}}/items",
+              "host": [
+                "{{host}}"
+              ],
+              "path": [
+                "items"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Form",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "name",
+                  "value": "Ada"
+                },
+                {
+                  "key": "role",
+                  "value": "{{role}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{host}}/form",
+              "host": [
+                "{{host}}"
+              ],
+              "path": [
+                "form"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Upload",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "multipart/form-data; boundary=Boundary"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "title",
+                  "value": "Hello",
+                  "type": "text"
+                },
+                {
+                  "key": "file",
+                  "src": "./notes.txt",
+                  "type": "file",
+                  "contentType": "text/plain"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{host}}/upload",
+              "host": [
+                "{{host}}"
+              ],
+              "path": [
+                "upload"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Raw file",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/octet-stream"
+              }
+            ],
+            "body": {
+              "mode": "file",
+              "file": {
+                "src": "./payload.bin"
+              }
+            },
+            "url": {
+              "raw": "{{host}}/raw",
+              "host": [
+                "{{host}}"
+              ],
+              "path": [
+                "raw"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Graph",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// RequestHandoff v0.1.0 does not translate HTTP Client scripts.",
+                  "// Original pre-request script:",
+                  "// request.variables.set(\"userId\", \"1\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// RequestHandoff v0.1.0 does not translate HTTP Client scripts.",
+                  "// Original response handler file (not inlined): ./check.js"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "graphql",
+              "graphql": {
+                "query": "query {\n  ping\n}",
+                "variables": "{\n  \"id\": \"{{userId}}\"\n}"
+              }
+            },
+            "url": {
+              "raw": "{{host}}/graphql",
+              "host": [
+                "{{host}}"
+              ],
+              "path": [
+                "graphql"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Generated",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{host}}/id/{{$uuid}}",
+              "host": [
+                "{{host}}"
+              ],
+              "path": [
+                "id",
+                "{{$uuid}}"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "host",
+      "value": "https://example.com",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "file-token",
+      "type": "string"
+    }
+  ]
+}

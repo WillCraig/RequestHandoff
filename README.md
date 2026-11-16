@@ -84,17 +84,54 @@ Not in this version:
 
 ## Build
 
-The project follows the [IntelliJ Platform Plugin Template](https://github.com/JetBrains/intellij-platform-plugin-template) layout: Gradle Kotlin DSL, the IntelliJ Platform Gradle Plugin 2.x, and a Gradle wrapper. The plugin module depends only on `com.intellij.modules.platform`.
+The project follows the [IntelliJ Platform Plugin Template](https://github.com/JetBrains/intellij-platform-plugin-template) layout: Gradle Kotlin DSL, the IntelliJ Platform Gradle Plugin 2.20.1, and a Gradle wrapper. The plugin module depends only on `com.intellij.modules.platform`.
 
-Parsing and export live in the `core` module. Those tests do not start an IDE. They include golden-style fixtures and validate generated collections against the vendored Postman Collection v2.1 schema.
+Parsing and export live in the `core` module. Those tests do not start an IDE.
 
 The plugin compiles against IntelliJ IDEA Community 2024.3 (`sinceBuild` 243) with a Java 21 toolchain. Platform 2024.3 requires Java 21; the Gradle plugin's configuration check rejects an older bytecode target. `until-build` is omitted so newer IDE builds stay compatible.
 
 ```bash
-./gradlew build test verifyPlugin
+./gradlew buildPlugin
 ```
 
-GitHub Actions runs that command on `ubuntu-latest` only.
+## Tests
+
+Parser and exporter tests live in `:core`. They load `.http` / `.rest` fixtures (including a kitchen fixture with comments, variables, multi-line bodies, file references, headers, authorization, environments, GraphQL, and form/multipart data), compare the Postman Collection v2.1 JSON and environment JSON with golden files, and validate the collection against the vendored Postman schema. An in-test read-back checks that the exported JSON matches the parsed request model. v0.1 does not ship a Postman importer.
+
+Light tests in the plugin module use `BasePlatformTestCase`. They cover action enablement, the export dialog (output directory, private values off by default), the written collection, environment, and `requestHandoff-report.md`, and the notification counts. They run headless inside Gradle and do not open a window.
+
+`integrationTest` is separate and is not part of `build` or `test`. It uses the IDE Starter and Driver to boot IntelliJ IDEA Community 2024.3 with the built plugin, open a sample `.http` file, run **Export with RequestHandoff**, and assert the collection JSON. The Driver confirms the dialog with the OK button's `doClick`, because a Robot mouse click does not land when the session has no display. On Linux, Starter starts Xvfb when `DISPLAY` is unset. The first run downloads the IDE.
+
+```bash
+./gradlew :core:test
+./gradlew :test
+./gradlew integrationTest
+```
+
+Plugin Verifier runs are split so an EAP failure can be reported without failing the stable check. The default run is the sinceBuild IDE (`current()`, IDEA Community 2024.3) plus `latest()` RELEASE builds of IDEA Community, IDEA Ultimate, PyCharm, and WebStorm. `recommended()` is not used: it would also queue every minor release and EAP since 243, and those EAP results would fail the stable check.
+
+```bash
+./gradlew verifyPlugin -PrequestHandoff.verifierChannel=current
+./gradlew verifyPlugin
+./gradlew verifyPlugin -PrequestHandoff.verifierChannel=eap
+```
+
+`current` is only the 2024.3 IDE. The default `stable` channel is `current` plus the latest stable builds. `eap` is the latest EAP of IDEA Community and IDEA Ultimate.
+
+## Continuous integration
+
+GitHub Actions runs on `ubuntu-latest` only. The Build workflow runs on every push and pull request:
+
+- unit tests and light fixture tests
+- the Starter smoke test, with IDE logs uploaded on failure
+- Plugin Verifier against the 2024.3 baseline and the latest stable IDEA Community, IDEA Ultimate, PyCharm, and WebStorm
+- Plugin Verifier against the latest IDEA Community and Ultimate EAP builds
+
+A stable verifier failure fails the workflow. An EAP failure does not. The EAP job opens or updates one issue titled `RequestHandoff IDE compatibility needs attention`, labeled `needs-attention` and assigned to WillCraig. A later failure updates that issue instead of opening another one.
+
+The IDE release watch workflow runs every Monday and can be started with `workflow_dispatch`. It records the newest stable and EAP builds from the JetBrains releases API, runs the unit and light tests, and runs the stable and EAP verifier. Any failure opens or updates the same `needs-attention` issue. The workflow has `contents: read` and `issues: write`. Tokens are not written into the issue body.
+
+Dependabot checks Gradle (including the IntelliJ Platform Gradle Plugin and Kotlin) and GitHub Actions weekly.
 
 ## License
 
