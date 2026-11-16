@@ -116,12 +116,18 @@ class FidelityTest {
         assertTrue(imported.reportMarkdown.contains("WebSocket requests are skipped."))
         assertTrue(imported.reportMarkdown.contains("gRPC requests are skipped."))
         assertTrue(imported.reportMarkdown.contains("Postman auth type 'bearer' was not imported."))
-        assertTrue(imported.reportMarkdown.contains("Dynamic variable '{{${'$'}uuid}}' was left unchanged."))
-        assertTrue(imported.files.joinToString("\n") { it.content }.contains("{{${'$'}uuid}}"))
+        // REPRESENTATIVE is a Postman collection, so it uses Postman's {{$guid}} spelling.
+        // The HTTP Client spelling {{$uuid}} is covered on import by ImporterTest and is
+        // rewritten to {{$guid}} on export by DynamicVariablesTest, so it cannot round-trip
+        // unchanged through import-then-export.
+        assertTrue(imported.reportMarkdown.contains("Dynamic variable '{{${'$'}guid}}' was left unchanged."))
+        assertTrue(imported.files.joinToString("\n") { it.content }.contains("{{${'$'}guid}}"))
         assertTrue(imported.files.joinToString("\n") { it.content }.contains("pm.environment.set"))
 
         val again = exportImported(imported, "representative", includePrivate = true)
         CollectionSchema.assertValid(again.collectionJson)
+        assertTrue(again.collectionJson.contains("{{${'$'}guid}}"))
+        assertFalse(again.collectionJson.contains("{{${'$'}uuid}}"))
         assertEquals(postmanRequests(REPRESENTATIVE), postmanRequests(again.collectionJson))
         val values = environmentValues(again.environments.single().json)
         assertEquals("https://local.example" to "default", values.getValue("host"))
@@ -427,7 +433,7 @@ class FidelityTest {
                     },
                     {
                       "name": "Generated",
-                      "request": {"method": "GET", "url": "{{host}}/id/{{${'$'}uuid}}"}
+                      "request": {"method": "GET", "url": "{{host}}/id/{{${'$'}guid}}"}
                     },
                     {
                       "name": "Authed",
