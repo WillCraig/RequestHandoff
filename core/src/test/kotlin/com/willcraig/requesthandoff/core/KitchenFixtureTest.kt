@@ -38,7 +38,7 @@ class KitchenFixtureTest {
 
         assertTrue(output.requestsExported > 1)
         assertEquals(2, output.requestsSkipped)
-        assertEquals(4, output.warningCount)
+        assertEquals(3, output.warningCount)
         assertTrue(output.reportMarkdown.contains("WebSocket requests are skipped"))
         assertTrue(output.reportMarkdown.contains("gRPC requests are skipped"))
         assertTrue(output.reportMarkdown.contains("left as comments"))
@@ -47,7 +47,7 @@ class KitchenFixtureTest {
         assertTrue(output.reportMarkdown.contains("Request flag '@no-log' was not converted."))
         assertTrue(output.reportMarkdown.contains("Private environment file was present and was not read."))
         assertTrue(output.collectionJson.contains("{{${'$'}guid}}"))
-        assertFalse(output.reportMarkdown.contains("Dynamic variable '{{${'$'}uuid}}' was left unchanged."))
+        assertFalse(output.reportMarkdown.contains("Dynamic variable '{{${'$'}uuid}}' has no Postman equivalent"))
         assertFalse(output.collectionJson.contains("client.test"))
 
         val readBack = readBackRequests(output.collectionJson)
