@@ -45,7 +45,8 @@ class KitchenFixtureTest {
         assertTrue(output.reportMarkdown.contains("Response handler script was not translated"))
         assertTrue(output.reportMarkdown.contains("Request flag '@no-log' was not converted."))
         assertTrue(output.reportMarkdown.contains("Private environment file was present and was not read."))
-        assertTrue(output.reportMarkdown.contains("Dynamic variable '{{${'$'}uuid}}' was left unchanged."))
+        assertTrue(output.collectionJson.contains("{{${'$'}guid}}"))
+        assertFalse(output.reportMarkdown.contains("Dynamic variable '{{${'$'}uuid}}' was left unchanged."))
         assertFalse(output.collectionJson.contains("client.test"))
 
         val readBack = readBackRequests(output.collectionJson)

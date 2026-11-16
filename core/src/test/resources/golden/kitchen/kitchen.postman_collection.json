@@ -258,13 +258,13 @@
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{host}}/id/{{$uuid}}",
+              "raw": "{{host}}/id/{{$guid}}",
               "host": [
                 "{{host}}"
               ],
               "path": [
                 "id",
-                "{{$uuid}}"
+                "{{$guid}}"
               ]
             }
           }
