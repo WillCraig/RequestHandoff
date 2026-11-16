@@ -4,6 +4,8 @@ build/
 .idea/
 *.iml
 out/
+allure-results/
 .kotlin/
 *.log
 .DS_Store
+__pycache__/

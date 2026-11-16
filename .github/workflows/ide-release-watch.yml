@@ -1,0 +1,90 @@
+name: IDE release watch
+
+on:
+  schedule:
+    # Monday 06:17 UTC. The minute is offset so the job does not start on the hour.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    name: Test newest stable and EAP
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Fetch sources
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@v2.0.0
+        with:
+          tool-cache: false
+          preinstalled-runtimes: false
+          swap-storage: false
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Record the newest JetBrains builds
+        run: |
+          python3 - << 'PY'
+          import json
+          import urllib.request
+
+          codes = ["IIC", "IIU", "PCP", "WS"]
+          lines = []
+          for kind in ("release", "eap"):
+              url = (
+                  "https://data.services.jetbrains.com/products/releases"
+                  f"?code={','.join(codes)}&type={kind}&latest=true"
+              )
+              with urllib.request.urlopen(url, timeout=60) as response:
+                  payload = json.load(response)
+              for code in codes:
+                  for item in payload.get(code, []):
+                      lines.append(
+                          f"{code} {item.get('type')} {item.get('version')} "
+                          f"build {item.get('build')} date {item.get('date')}"
+                      )
+          text = "\n".join(lines) + "\n"
+          open("releases.txt", "w", encoding="utf-8").write(text)
+          print(text, end="")
+          PY
+
+      - name: Run unit and fixture tests
+        run: ./gradlew :core:test :test --stacktrace
+
+      - name: Verify latest stable IDEs
+        run: ./gradlew verifyPlugin --stacktrace
+
+      - name: Verify latest EAP IDEs
+        run: ./gradlew verifyPlugin -PrequestHandoff.verifierChannel=eap --stacktrace
+
+      - name: Upload reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ide-release-watch
+          if-no-files-found: ignore
+          path: |
+            releases.txt
+            build/reports/pluginVerifier/**
+            build/reports/tests/**
+            core/build/reports/tests/**
+
+      - name: Open or update the needs-attention issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEEDS_ATTENTION_REASON: The weekly IDE release watch failed while testing the newest stable or EAP builds.
+        run: python3 .github/scripts/open_needs_attention.py

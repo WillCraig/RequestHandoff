@@ -2,17 +2,23 @@ name: Build
 
 on:
   push:
-    branches: [main]
   pull_request:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write
 
 jobs:
   build:
-    name: Build, test, and verify
+    name: Build and test
+    # Push already checks same-repo pull requests. Fork pull requests have no push event here.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Fetch sources
         uses: actions/checkout@v4
@@ -26,5 +32,126 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build, test, and verify
-        run: ./gradlew build test verifyPlugin --stacktrace
+      - name: Build and test
+        run: ./gradlew build test --stacktrace
+
+  integration:
+    name: IDE smoke test
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Fetch sources
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@v2.0.0
+        with:
+          tool-cache: false
+          preinstalled-runtimes: false
+          swap-storage: false
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Boot a real IDE and export a sample project
+        run: ./gradlew integrationTest --stacktrace
+
+      - name: Upload IDE logs and test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ide-smoke-logs
+          if-no-files-found: ignore
+          path: |
+            out/ide-tests/tests/**/log/**
+            build/reports/tests/**
+            core/build/reports/tests/**
+
+  verify-stable:
+    name: Verify stable IDEs
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Fetch sources
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@v2.0.0
+        with:
+          tool-cache: false
+          preinstalled-runtimes: false
+          swap-storage: false
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Verify sinceBuild 243 and latest stable IDEs
+        run: ./gradlew verifyPlugin --stacktrace
+
+      - name: Upload verifier reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-verifier-stable
+          if-no-files-found: ignore
+          path: build/reports/pluginVerifier/**
+
+  verify-eap:
+    name: Verify EAP IDEs
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Fetch sources
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@v2.0.0
+        with:
+          tool-cache: false
+          preinstalled-runtimes: false
+          swap-storage: false
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Verify latest EAP IDEs
+        id: eap
+        continue-on-error: true
+        run: ./gradlew verifyPlugin -PrequestHandoff.verifierChannel=eap --stacktrace
+
+      - name: Upload verifier reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-verifier-eap
+          if-no-files-found: ignore
+          path: build/reports/pluginVerifier/**
+
+      - name: Open or update the needs-attention issue
+        if: steps.eap.outcome == 'failure'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEEDS_ATTENTION_REASON: Plugin Verifier failed on the latest IntelliJ IDEA Community and Ultimate EAP builds. This check does not block the pull request.
+        run: python3 .github/scripts/open_needs_attention.py

@@ -63,13 +63,13 @@ class ExportAction : AnAction() {
         val completed = ProgressManager.getInstance().runProcessWithProgressSynchronously(
             {
                 try {
-                    val exportInput = ReadAction.compute<ExportInput, RuntimeException> {
-                        collect(project, targets, includePrivate)
-                    }
-                    if (exportInput.files.isEmpty()) return@runProcessWithProgressSynchronously
-                    val output = exportHttpFiles(exportInput, ExportOptions.random())
-                    write(outputDirectory, output)
-                    holder[0] = output
+                    holder[0] = exportSelection(
+                        project,
+                        targets,
+                        outputDirectory,
+                        includePrivate,
+                        ExportOptions.random(),
+                    )
                 } catch (cancelled: ProcessCanceledException) {
                     throw cancelled
                 } catch (ex: Exception) {
@@ -90,7 +90,26 @@ class ExportAction : AnAction() {
             notify(project, RequestHandoffBundle.message("export.noFiles"), NotificationType.WARNING, report = null)
             return
         }
-        val report = outputDirectory.resolve(output.reportFileName)
+        notifyExported(project, output, outputDirectory.resolve(output.reportFileName))
+    }
+
+    internal fun exportSelection(
+        project: Project,
+        targets: List<VirtualFile>,
+        outputDirectory: Path,
+        includePrivate: Boolean,
+        options: ExportOptions,
+    ): ExportOutput? {
+        val exportInput = ReadAction.compute<ExportInput, RuntimeException> {
+            collect(project, targets, includePrivate)
+        }
+        if (exportInput.files.isEmpty()) return null
+        val output = exportHttpFiles(exportInput, options)
+        write(outputDirectory, output)
+        return output
+    }
+
+    internal fun notifyExported(project: Project, output: ExportOutput, report: Path) {
         notify(
             project,
             RequestHandoffBundle.message(

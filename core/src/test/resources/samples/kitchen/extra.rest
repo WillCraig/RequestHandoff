@@ -1,0 +1,4 @@
+### Ping
+GET {{host}}/ping
+X-Trace: {{trace}}
+Authorization: Bearer {{token}}
