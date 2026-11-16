@@ -1,8 +1,8 @@
 # RequestHandoff
 
-RequestHandoff is a free, open-source IntelliJ Platform tool that exports [JetBrains HTTP Client](https://www.jetbrains.com/help/idea/http-client-in-product-code-editor.html) `.http` and `.rest` files, folders of those files, and `http-client.env.json` environments.
+RequestHandoff is a free, open-source IntelliJ Platform tool that converts between [JetBrains HTTP Client](https://www.jetbrains.com/help/idea/http-client-in-product-code-editor.html) `.http` and `.rest` files and [Postman Collection v2.1](https://schema.getpostman.com/json/collection/v2.1.0/collection.json).
 
-It writes [Postman Collection v2.1](https://schema.getpostman.com/json/collection/v2.1.0/collection.json) JSON and one Postman environment file for each named environment. It parses request files itself and does not use the HTTP Client plugin, so it runs in every JetBrains IDE, including Community editions.
+It exports request files, folders of those files, and `http-client.env.json` environments, and imports a collection plus an optional Postman environment back to `.http` files. It parses request files itself and does not use the HTTP Client plugin, so it runs in every JetBrains IDE, including Community editions.
 
 Folder export and environment export are included at no cost.
 
@@ -45,6 +45,22 @@ The closest `http-client.env.json` between the selection and the project root is
 
 `{{var}}` placeholders are kept as Postman variables. File-level `@name = value` lines become collection variables. Dynamic variables are rewritten when Postman has an equivalent (`{{$uuid}}` becomes `{{$guid}}`). `{{$env.NAME}}`, `{{$processEnv NAME}}`, and `{{$dotenv NAME}}` become `{{NAME}}`. The value on this machine is not copied.
 
+## Import
+
+1. Choose **Tools | Import with RequestHandoff**. The action is also on the Project view popup menu, and on the editor popup for a `.json` file.
+2. Choose a Postman Collection v2.1 JSON file. A Postman environment file is optional.
+3. Choose an output directory.
+4. Import writes:
+   - `.http` files. A folder of requests becomes one file. A folder that also contains folders becomes a directory.
+   - `http-client.env.json` for environment values that are not secrets. Dotted keys such as `auth.user` are nested, which is how HTTP Client reads `{{auth.user}}`.
+   - `http-client.private.env.json` when a Postman value is marked `secret`.
+   - `requestHandoff-import-report.md`
+5. A notification reports how many requests were imported, how many were skipped, and how many warnings were recorded. **Open report** opens the import report.
+
+Secret values are written only to `http-client.private.env.json`. They are not written to the public environment file, the import report, or logs. Disabled environment values are skipped. Keep the private file out of version control.
+
+`{{var}}` placeholders are kept. Collection variables become `@name = value` lines. A collection that becomes one `.http` file keeps those lines in that file. A collection that becomes several files puts them in `variables.http`. The `raw` URL is used when Postman provides one.
+
 ## Mapping
 
 | HTTP Client | Postman Collection v2.1 |
@@ -77,6 +93,17 @@ v0.1 does not translate everything. The export report states these limits for ev
 - `run` imports, response redirects (`>>`), saved response examples, and request flags such as `@no-log` are listed in the report and are not converted.
 - Private environment values are never written unless you explicitly enable them for that export. The report does not print those values.
 
+Import uses that export surface in reverse. These extra limits apply:
+
+- Scripts are copied into the `.http` file as comments. They are not turned into `< {% %}` or `> {% %}` blocks, and a later export does not recreate Postman events from those comments. `ImportMappings` in `core/.../ImportMappers.kt` is the hook for script translation.
+- Postman auth objects are reported and skipped. `Authorization` headers are kept. Collection and folder auth are not copied onto child requests. `ImportMappings` is the hook for auth objects.
+- Dynamic variables such as `{{$uuid}}` are left unchanged. `ImportMappings` is the hook for renaming them.
+- WebSocket and gRPC requests, saved examples, proxy settings, and client certificates are skipped and listed in the import report.
+- A multipart boundary is generated. The parts are preserved. `.rest` files come back as `.http`.
+- A single-file export has no folders, so import writes one file named after the collection. Root-level requests that share a collection with folders are written to `requests.http`.
+- GraphQL whose Postman method is POST is written with the `GRAPHQL` method. HTTP Client stores that as POST. A raw language hint becomes a `Content-Type` header when the request did not already have one.
+- Header order and trailing whitespace may differ. The `raw` URL is kept when it is present, so a disabled query parameter that is still inside `raw` stays in the URL.
+
 ## Later milestones
 
 Not in this version:
@@ -84,7 +111,6 @@ Not in this version:
 - Script translation from `client.*` to `pm.*`
 - Postman auth objects
 - Marketplace signing and publishing
-- Import-back / round-trip notes
 
 ## Build
 
@@ -100,9 +126,9 @@ The plugin compiles against IntelliJ IDEA Community 2024.3 (`sinceBuild` 243) wi
 
 ## Tests
 
-Parser and exporter tests live in `:core`. They load `.http` / `.rest` fixtures (including a kitchen fixture with comments, variables, multi-line bodies, file references, headers, authorization, environments, GraphQL, and form/multipart data), compare the Postman Collection v2.1 JSON and environment JSON with golden files, and validate the collection against the vendored Postman schema. An in-test read-back checks that the exported JSON matches the parsed request model. v0.1 does not ship a Postman importer.
+Parser, exporter, and importer tests live in `:core`. They load `.http` / `.rest` fixtures (including a kitchen fixture with comments, variables, multi-line bodies, file references, headers, authorization, environments, GraphQL, and form/multipart data), compare the Postman Collection v2.1 JSON and environment JSON with golden files, and validate the collection against the vendored Postman schema. An in-test read-back checks that the exported JSON matches the parsed request model. The fidelity suite exports those samples and imports the result, then imports a representative collection (GraphQL, form and multipart, file refs, collection variables, WebSocket and gRPC) and exports it again. Comparisons allow header order, trailing whitespace, and a regenerated multipart boundary, and they fail on semantic drift. Secret Postman values are asserted to be absent from the public environment, the `.http` files, and the report.
 
-Light tests in the plugin module use `BasePlatformTestCase`. They cover action enablement, the export dialog (output directory, private values off by default), the written collection, environment, and `requestHandoff-report.md`, and the notification counts. They run headless inside Gradle and do not open a window.
+Light tests in the plugin module use `BasePlatformTestCase`. They cover action enablement, the export dialog (output directory, private values off by default), the import dialog (collection file, optional environment, output directory), the written collection, environment, and report files, and the notification counts. They run headless inside Gradle and do not open a window. The IDE Starter smoke test covers export. Import is covered by the light tests rather than a second IDE boot.
 
 `integrationTest` is separate and is not part of `build` or `test`. It uses the IDE Starter and Driver to boot IntelliJ IDEA Community 2024.3 with the built plugin, open a sample `.http` file, run **Export with RequestHandoff**, and assert the collection JSON. The Driver confirms the dialog with the OK button's `doClick`, because a Robot mouse click does not land when the session has no display. On Linux, Starter starts Xvfb when `DISPLAY` is unset. The first run downloads the IDE.
 
