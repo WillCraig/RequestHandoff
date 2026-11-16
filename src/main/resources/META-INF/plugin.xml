@@ -1,0 +1,40 @@
+<!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
+<idea-plugin>
+    <id>com.willcraig.requesthandoff</id>
+    <name>RequestHandoff</name>
+    <vendor email="24501963+WillCraig@users.noreply.github.com" url="https://github.com/WillCraig/RequestHandoff">Will Craig</vendor>
+
+    <description><![CDATA[
+        <p>RequestHandoff exports JetBrains HTTP Client files (<code>.http</code>, <code>.rest</code>) and folders of them to Postman Collection v2.1, and exports <code>http-client.env.json</code> environments to Postman environment files.</p>
+        <p>Folder export and environment export are free. Request files are parsed directly, with no dependency on the HTTP Client plugin, so this works in every JetBrains IDE, including Community editions.</p>
+        <p>Postman is a trademark of Postman, Inc. JetBrains and IntelliJ are trademarks of JetBrains s.r.o. This project is not affiliated with either.</p>
+    ]]></description>
+
+    <change-notes><![CDATA[
+        <ul>
+            <li>0.1.0 — Export <code>.http</code> and <code>.rest</code> files and folders, plus public HTTP Client environments. Private environment values stay opt-in.</li>
+        </ul>
+    ]]></change-notes>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <!-- since-build is 243 (2024.3). until-build is omitted so newer IDE builds stay compatible. -->
+    <idea-version since-build="243"/>
+
+    <resource-bundle>messages.RequestHandoffBundle</resource-bundle>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <notificationGroup id="RequestHandoff.Notifications" displayType="BALLOON"/>
+    </extensions>
+
+    <actions>
+        <action id="com.willcraig.requesthandoff.Export"
+                class="com.willcraig.requesthandoff.ExportAction"
+                text="action.com.willcraig.requesthandoff.Export.text"
+                description="action.com.willcraig.requesthandoff.Export.description">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+    </actions>
+</idea-plugin>
