@@ -42,9 +42,11 @@ class ExporterTest {
         assertEquals("List users", list.fields.getValue("name").str())
         val listRequest = list.fields.getValue("request") as Jv.Obj
         assertEquals("GET", listRequest.fields.getValue("method").str())
-        assertFalse(listRequest.fields.containsKey("auth"))
+        assertEquals("bearer", (listRequest.fields.getValue("auth") as Jv.Obj).fields.getValue("type").str())
+        assertEquals("{{token}}", authValue(listRequest.fields.getValue("auth") as Jv.Obj, "bearer", "token"))
         val headers = (listRequest.fields.getValue("header") as Jv.Arr).items.map { it as Jv.Obj }
-        assertEquals("Bearer {{token}}", headers.first { it.fields.getValue("key").str() == "Authorization" }.fields.getValue("value").str())
+        assertTrue(headers.none { it.fields.getValue("key").str().equals("Authorization", ignoreCase = true) })
+        assertEquals("application/json", headers.first { it.fields.getValue("key").str() == "Accept" }.fields.getValue("value").str())
         val url = listRequest.fields.getValue("url") as Jv.Obj
         assertEquals("{{host}}/users?active=true&q={{search}}&page=2", url.fields.getValue("raw").str())
         val query = (url.fields.getValue("query") as Jv.Arr).items.map { it as Jv.Obj }
@@ -56,12 +58,20 @@ class ExporterTest {
         assertEquals("createUser", create.fields.getValue("name").str())
         val createRequest = create.fields.getValue("request") as Jv.Obj
         assertEquals("POST", createRequest.fields.getValue("method").str())
+        val basic = createRequest.fields.getValue("auth") as Jv.Obj
+        assertEquals("basic", basic.fields.getValue("type").str())
+        assertEquals("user", authValue(basic, "basic", "username"))
+        assertEquals("pass", authValue(basic, "basic", "password"))
+        val createHeaders = (createRequest.fields.getValue("header") as Jv.Arr).items.map { it as Jv.Obj }
+        assertTrue(createHeaders.none { it.fields.getValue("key").str().equals("Authorization", ignoreCase = true) })
         val body = createRequest.fields.getValue("body") as Jv.Obj
         assertEquals("raw", body.fields.getValue("mode").str())
         assertEquals("json", ((body.fields.getValue("options") as Jv.Obj).fields.getValue("raw") as Jv.Obj).fields.getValue("language").str())
         assertTrue(output.reportMarkdown.contains("Request flag '@no-log' was not converted."))
         assertTrue(output.reportMarkdown.contains("WebSocket and gRPC requests are skipped."))
         assertTrue(output.reportMarkdown.contains("not translated"))
+        assertTrue(output.reportMarkdown.contains("exported as Postman auth objects"))
+        assertFalse(output.reportMarkdown.contains("Postman auth objects are not created"))
     }
 
     @Test
@@ -179,7 +189,10 @@ class ExporterTest {
         val graphItem = items[4] as Jv.Obj
         val graph = requestOf(graphItem)
         assertEquals("POST", graph.fields.getValue("method").str())
-        assertFalse(graph.fields.containsKey("auth"))
+        assertEquals("bearer", (graph.fields.getValue("auth") as Jv.Obj).fields.getValue("type").str())
+        assertEquals("{{token}}", authValue(graph.fields.getValue("auth") as Jv.Obj, "bearer", "token"))
+        val graphHeaders = (graph.fields.getValue("header") as Jv.Arr).items.map { it as Jv.Obj }
+        assertEquals(listOf("X-REQUEST-TYPE"), graphHeaders.map { it.fields.getValue("key").str() })
         val graphBody = graph.fields.getValue("body") as Jv.Obj
         assertEquals("graphql", graphBody.fields.getValue("mode").str())
         val graphql = graphBody.fields.getValue("graphql") as Jv.Obj
@@ -335,6 +348,12 @@ class ExporterTest {
     private fun firstItem(output: ExportOutput): Jv.Obj = items(output).first() as Jv.Obj
 
     private fun requestOf(item: Jv): Jv.Obj = (item as Jv.Obj).fields.getValue("request") as Jv.Obj
+
+    private fun authValue(auth: Jv.Obj, type: String, key: String): String {
+        val params = auth.fields.getValue(type) as Jv.Arr
+        val attribute = params.items.map { it as Jv.Obj }.first { it.fields.getValue("key").str() == key }
+        return attribute.fields.getValue("value").str()
+    }
 
     private fun Jv.str(): String = assertIs<Jv.Str>(this).value
 }

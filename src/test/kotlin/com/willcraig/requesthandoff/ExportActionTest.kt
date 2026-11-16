@@ -89,6 +89,9 @@ class ExportActionTest : BasePlatformTestCase() {
             assertFalse(collection.readText().contains("test-private-token"))
             assertFalse(environment.readText().contains("test-private-token"))
             assertFalse(report.readText().contains("test-private-token"))
+            assertTrue(environment.readText().contains("\"key\": \"token\""))
+            assertTrue(environment.readText().contains("\"value\": \"\""))
+            assertTrue(report.readText().contains("Auth variable 'token' is not in the public environment."))
             assertTrue(report.readText().contains("Private environment file was present and was not read."))
             assertTrue(report.readText().contains("WebSocket requests are skipped"))
 
