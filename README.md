@@ -67,7 +67,7 @@ Secret values are written only to `http-client.private.env.json`. They are not w
 | --- | --- |
 | `### Title` and `# @name id` | Request name. The `###` title is used when it is present; otherwise `# @name` is used. |
 | Method and URL | `request.method` and `url`, with the query string in `url.query`. `GRAPHQL` is sent as `POST`. |
-| Header lines | `request.header`. `Authorization` stays a header. |
+| Header lines | `request.header`. |
 | `{{var}}` | Left as a Postman `{{var}}`. |
 | `{{$uuid}}`, `{{$random.uuid}}` | `{{$guid}}`. Postman also documents `{{$randomUUID}}`; both are UUID values, and the export uses `{{$guid}}` because that entry is specified as uuid-v4. |
 | `{{$timestamp}}`, `{{$isoTimestamp}}`, `{{$randomInt}}` | The same names. |
@@ -80,6 +80,7 @@ Secret values are written only to `http-client.private.env.json`. They are not w
 | Multipart text parts | `formdata` text fields. |
 | Multipart file parts and `< ./file` bodies | File `src` (the path as written). File bytes are not embedded. |
 | `X-REQUEST-TYPE: GraphQL` or the `GRAPHQL` method | `body.mode = graphql`. A JSON object after a blank line, or a JSON body with `query`, becomes GraphQL variables. |
+| `Authorization: Basic` or `Digest` username and password, `Authorization: Bearer`, an API key header (`X-Api-Key`, `Api-Key`, `ApiKey`) or query (`api_key`, `apikey`, `api-key`, `x-api-key`), `{{$auth.token("id")}}`, and `{{$auth.idToken("id")}}` | `request.auth`. The matching header or query field is omitted. Access tokens are not acquired or refreshed. |
 | Directories and `.http` / `.rest` files | Collection folders. |
 
 ## Limitations
@@ -88,7 +89,7 @@ v0.1 does not translate everything. The export report states these limits for ev
 
 - Response-handler scripts (`> {% %}` and `> ./script.js`) and pre-request scripts (`< {% %}` and `< ./script.js`) are **not** translated. Inline scripts are copied into the collection as commented-out script text. Script files are named in those comments and are not inlined.
 - WebSocket and gRPC requests are skipped, with a warning in the report.
-- `Authorization` headers are copied as headers. Postman auth objects are not created.
+- Basic, Bearer, Digest, and API key credentials, and OAuth 2.0 references, are exported as Postman auth objects. The matching Authorization header or API key field is omitted so Postman does not send it twice. Unrecognized Authorization schemes stay headers. Access tokens are not acquired or refreshed. HTTP Client has no file-level auth, and an environment `Security.Auth` entry is not applied unless a request references it.
 - Dynamic variables with no Postman equivalent are left unchanged. `{{$random.integer(from, to)}}` becomes `{{$randomInt}}` and loses its range. Host environment variables are not read.
 - `run` imports, response redirects (`>>`), saved response examples, and request flags such as `@no-log` are listed in the report and are not converted.
 - Private environment values are never written unless you explicitly enable them for that export. The report does not print those values.
@@ -109,7 +110,6 @@ Import uses that export surface in reverse. These extra limits apply:
 Not in this version:
 
 - Script translation from `client.*` to `pm.*`
-- Postman auth objects
 - Marketplace signing and publishing
 
 ## Build
