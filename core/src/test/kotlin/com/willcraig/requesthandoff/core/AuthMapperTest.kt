@@ -247,8 +247,10 @@ class AuthMapperTest {
         assertTrue(output.reportMarkdown.contains("OAuth2 configuration 'api' was exported without an access token or refresh token."))
         assertTrue(output.reportMarkdown.contains("Custom request headers for 'api' were omitted."))
         assertTrue(output.reportMarkdown.contains("Custom request parameters for 'api' without a Use scope"))
-        assertTrue(output.reportMarkdown.contains("Dynamic variable '{{${'$'}uuid}}' was left unchanged."))
-        assertFalse(output.reportMarkdown.contains("Dynamic variable '{{${'$'}auth.token(\"api\")}}' was left unchanged."))
+        assertTrue(output.collectionJson.contains("{{${'$'}guid}}"))
+        assertFalse(output.collectionJson.contains("{{${'$'}uuid}}"))
+        assertFalse(output.reportMarkdown.contains("Dynamic variable '{{${'$'}uuid}}'"))
+        assertFalse(output.reportMarkdown.contains("Dynamic variable '{{${'$'}auth.token(\"api\")}}'"))
         assertFalse(output.reportMarkdown.contains("client-secret-must-not-print"))
         val dev = environmentValues(output, "dev")
         assertEquals("", dev.getValue("clientSecret").value)
@@ -268,7 +270,7 @@ class AuthMapperTest {
             publicJson = """{"dev":{"Security":{"Auth":{"api":{"Type":"OAuth2","Grant Type":"Client Credentials","Token URL":"https://auth.example/token","Client ID":"client-id"}}}}}""",
         )
         assertEquals("oauth2", authType(requestOf(items(output).single())))
-        assertTrue(output.reportMarkdown.contains("Dynamic variable '{{${'$'}auth.token(\"api\")}}' was left unchanged."))
+        assertTrue(output.reportMarkdown.contains("Dynamic variable '{{${'$'}auth.token(\"api\")}}' has no Postman equivalent and was left unchanged."))
         assertTrue(output.collectionJson.contains("${'$'}auth.token(\\\"api\\\")"))
     }
 

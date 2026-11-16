@@ -34,7 +34,7 @@ fun exportHttpFiles(input: ExportInput, options: ExportOptions = ExportOptions.r
                 note.file == path &&
                     note.request == request.name &&
                     result.consumedAuthCalls.any { call ->
-                        note.message == "Dynamic variable '$call' was left unchanged." &&
+                        note.message == "Dynamic variable '$call' has no Postman equivalent and was left unchanged." &&
                             !requestContains(result.request, call)
                     }
             }
