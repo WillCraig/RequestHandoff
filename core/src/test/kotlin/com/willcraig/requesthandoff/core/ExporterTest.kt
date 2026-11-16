@@ -193,12 +193,13 @@ class ExporterTest {
         assertTrue(exec.none { it.contains("client.test") && !it.trim().startsWith("//") })
 
         val url = requestOf(items[5]).fields.getValue("url") as Jv.Obj
-        assertTrue(url.fields.getValue("raw").str().contains("{{${'$'}uuid}}"))
+        assertTrue(url.fields.getValue("raw").str().contains("{{${'$'}guid}}"))
+        assertFalse(url.fields.getValue("raw").str().contains("{{${'$'}uuid}}"))
         assertTrue(output.reportMarkdown.contains("WebSocket requests are skipped"))
         assertTrue(output.reportMarkdown.contains("gRPC requests are skipped"))
         assertTrue(output.reportMarkdown.contains("Import 'run ./auth.http' was not converted."))
         assertTrue(output.reportMarkdown.contains("Response output redirect"))
-        assertTrue(output.reportMarkdown.contains("Dynamic variable '{{${'$'}uuid}}' was left unchanged."))
+        assertFalse(output.reportMarkdown.contains("Dynamic variable '{{${'$'}uuid}}' was left unchanged."))
         assertTrue(output.reportMarkdown.contains("Pre-request script was not translated"))
         assertTrue(output.reportMarkdown.contains("Response handler script was not translated"))
     }

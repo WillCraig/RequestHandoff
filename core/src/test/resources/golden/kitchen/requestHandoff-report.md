@@ -2,7 +2,7 @@
 
 Requests exported: 8
 Requests skipped: 2
-Warnings: 5
+Warnings: 4
 
 ## Limitations
 
@@ -11,7 +11,7 @@ These limits apply to every v0.1 export:
 - Response-handler and pre-request scripts are not translated. Inline scripts are copied into the collection as commented-out script text. Script files are named in those comments and are not inlined.
 - WebSocket and gRPC requests are skipped.
 - Authorization headers are copied as headers. Postman auth objects are not created.
-- Dynamic variables such as `{{$uuid}}` are left unchanged.
+- Dynamic variables with a Postman equivalent are rewritten (`{{$uuid}}` becomes `{{$guid}}`). Unmapped dynamic variables are left unchanged and listed below. `{{$random.integer(from, to)}}` becomes `{{$randomInt}}`, which ignores that range. Host environment variables (`{{$env.NAME}}`, `{{$processEnv NAME}}`, and `{{$dotenv NAME}}`) are not read.
 
 ## Skipped requests
 
@@ -24,7 +24,6 @@ These limits apply to every v0.1 export:
 - requests.http — List items — Request flag '@no-log' was not converted.
 - requests.http — Graph — Pre-request script was not translated and is included as comments.
 - requests.http — Graph — Response handler script was not translated and is included as comments.
-- requests.http — Generated — Dynamic variable '{{$uuid}}' was left unchanged.
 
 ## Environments
 
