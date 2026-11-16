@@ -4,8 +4,10 @@ on:
   push:
   pull_request:
 
+# Push and pull_request share a branch name. Keep their groups apart so the
+# skipped same-repo pull_request run does not cancel the push run that does the work.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
 permissions:
