@@ -321,13 +321,14 @@ private fun readEnvironments(
             notes += Note(Severity.WARNING, file, null, "Environment '$name' is not a JSON object and was skipped.")
             continue
         }
-        environments[name] = flattenEnvironment(value)
+        environments[name] = flattenEnvironment(value, file, notes)
     }
     return environments
 }
 
-private fun flattenEnvironment(value: Jv.Obj): List<Pair<String, String>> {
+private fun flattenEnvironment(value: Jv.Obj, file: String, notes: MutableList<Note>): List<Pair<String, String>> {
     val out = mutableListOf<Pair<String, String>>()
+    val seen = linkedSetOf<String>()
     fun walk(prefix: String, node: Jv) {
         when (node) {
             is Jv.Obj -> {
@@ -340,7 +341,13 @@ private fun flattenEnvironment(value: Jv.Obj): List<Pair<String, String>> {
                 }
             }
             is Jv.Arr -> out += prefix to render(node).trimEnd()
-            is Jv.Str -> out += prefix to node.value
+            is Jv.Str -> {
+                val rewritten = rewriteDynamicVariables(node.value)
+                rewritten.warnings.forEach { message ->
+                    if (seen.add(message)) notes += Note(Severity.WARNING, file, null, message)
+                }
+                out += prefix to rewritten.text
+            }
             is Jv.Num -> out += prefix to node.literal
             is Jv.Bool -> out += prefix to node.value.toString()
             Jv.Null -> out += prefix to ""
@@ -367,7 +374,7 @@ private fun renderReport(
     append("- Response-handler and pre-request scripts are not translated. Inline scripts are copied into the collection as commented-out script text. Script files are named in those comments and are not inlined.\n")
     append("- WebSocket and gRPC requests are skipped.\n")
     append("- Authorization headers are copied as headers. Postman auth objects are not created.\n")
-    append("- Dynamic variables such as `{{${'$'}uuid}}` are left unchanged.\n\n")
+    append("- Dynamic variables with a Postman equivalent are rewritten (`{{${'$'}uuid}}` becomes `{{${'$'}guid}}`). Unmapped dynamic variables are left unchanged and listed below. `{{${'$'}random.integer(from, to)}}` becomes `{{${'$'}randomInt}}`, which ignores that range. Host environment variables (`{{${'$'}env.NAME}}`, `{{${'$'}processEnv NAME}}`, and `{{${'$'}dotenv NAME}}`) are not read.\n\n")
     append("## Skipped requests\n\n")
     append(section(notes.filter { it.severity == Severity.SKIPPED }))
     append("## Not converted\n\n")

@@ -1,7 +1,8 @@
 package com.willcraig.requesthandoff.core
 
 private val SEPARATOR = Regex("""^###(?:\s+(.*))?$""")
-private val REQUEST_LINE = Regex("""^([A-Za-z][A-Za-z0-9+_.-]*)\s+(\S+)(?:\s+HTTP/\d(?:\.\d)?)?\s*$""")
+private val REQUEST_METHOD = Regex("""^([A-Za-z][A-Za-z0-9+_.-]*)\s+""")
+private val HTTP_VERSION = Regex("""^HTTP/\d(?:\.\d)?$""")
 private val FILE_VARIABLE = Regex("""^@([A-Za-z_][\w.\-]*)\s*=\s*(.*)$""")
 private val DIRECTIVE = Regex("""^#\s*@([A-Za-z][\w-]*)\s*(.*)$""")
 private val HEADER_LINE = Regex("""^([^:\s][^:]*)\s*:\s?(.*)$""")
@@ -114,7 +115,11 @@ private fun parseBlock(file: String, block: Block): BlockResult {
                     }
                     FILE_VARIABLE.matchEntire(trimmed) != null -> {
                         val match = FILE_VARIABLE.matchEntire(trimmed)!!
-                        variables += match.groupValues[1] to match.groupValues[2].trim()
+                        val rewritten = rewriteDynamicVariables(match.groupValues[2].trim())
+                        rewritten.warnings.forEach { message ->
+                            notes += Note(Severity.WARNING, file, null, message, line.number)
+                        }
+                        variables += match.groupValues[1] to rewritten.text
                         index++
                     }
                     RUN_LINE.matchEntire(trimmed) != null -> {
@@ -219,9 +224,8 @@ private fun parseBlock(file: String, block: Block): BlockResult {
         return BlockResult(variables, emptyList(), notes)
     }
 
-    val displayName = block.title?.takeIf { it.isNotBlank() }
-        ?: atName?.takeIf { it.isNotBlank() }
-        ?: fallbackName(method, url)
+    val explicitName = block.title?.takeIf { it.isNotBlank() } ?: atName?.takeIf { it.isNotBlank() }
+    val displayName = explicitName ?: fallbackName(method, url)
     val kind = skipKind(method, url)
     if (kind != null) {
         notes += Note(Severity.SKIPPED, file, displayName, kind, requestLine.number)
@@ -246,14 +250,15 @@ private fun parseBlock(file: String, block: Block): BlockResult {
         )
     }
     scriptNotes(file, displayName, requestLine.number, preScripts, responseScripts, notes)
-    dynamicVariableNotes(file, displayName, requestLine.number, url, headers, body, notes)
+    val rewritten = rewriteRequestFields(file, displayName, requestLine.number, url, headers, body, notes)
+    val exportedName = explicitName ?: fallbackName(exportMethod, rewritten.url)
 
     val request = HttpRequest(
-        name = displayName,
+        name = exportedName,
         method = exportMethod,
-        url = url,
-        headers = headers,
-        body = body,
+        url = rewritten.url,
+        headers = rewritten.headers,
+        body = rewritten.body,
         preRequestScripts = preScripts,
         responseScripts = responseScripts,
         line = requestLine.number,
@@ -264,9 +269,29 @@ private fun parseBlock(file: String, block: Block): BlockResult {
 private fun isComment(trimmed: String): Boolean = trimmed.startsWith("//") || trimmed.startsWith("#")
 
 private fun requestLineOf(trimmed: String): Pair<String, String>? {
-    val match = REQUEST_LINE.matchEntire(trimmed) ?: return null
-    val method = match.groupValues[1]
-    val url = match.groupValues[2]
+    val methodMatch = REQUEST_METHOD.find(trimmed) ?: return null
+    val method = methodMatch.groupValues[1]
+    var index = methodMatch.range.last + 1
+    val urlStart = index
+    var depth = 0
+    while (index < trimmed.length) {
+        if (trimmed.startsWith("{{", index)) {
+            depth++
+            index += 2
+            continue
+        }
+        if (depth > 0 && trimmed.startsWith("}}", index)) {
+            depth--
+            index += 2
+            continue
+        }
+        if (depth == 0 && trimmed[index].isWhitespace()) break
+        index++
+    }
+    if (index == urlStart) return null
+    val url = trimmed.substring(urlStart, index)
+    val rest = trimmed.substring(index).trim()
+    if (rest.isNotEmpty() && !HTTP_VERSION.matches(rest)) return null
     val upper = method.uppercase()
     val known = upper in KNOWN_METHODS
     val custom = method.all { it.isUpperCase() || it.isDigit() || it == '_' || it == '-' || it == '+' } &&
@@ -508,7 +533,9 @@ private fun scriptNotes(
     }
 }
 
-private fun dynamicVariableNotes(
+private data class RewrittenRequest(val url: String, val headers: List<Header>, val body: Body)
+
+private fun rewriteRequestFields(
     file: String,
     request: String,
     line: Int,
@@ -516,28 +543,24 @@ private fun dynamicVariableNotes(
     headers: List<Header>,
     body: Body,
     notes: MutableList<Note>,
-) {
-    val chunks = mutableListOf(url)
-    headers.forEach { chunks += it.value }
-    when (body) {
-        is Body.Raw -> chunks += body.text
-        is Body.GraphQl -> {
-            chunks += body.query
-            body.variables?.let { chunks += it }
+): RewrittenRequest {
+    val seen = linkedSetOf<String>()
+    fun rewrite(text: String): String {
+        val result = rewriteDynamicVariables(text)
+        result.warnings.forEach { message ->
+            if (seen.add(message)) notes += Note(Severity.WARNING, file, request, message, line)
         }
-        is Body.UrlEncoded -> body.fields.forEach { chunks += it.second }
-        is Body.Multipart -> body.parts.forEach { part -> part.text?.let { chunks += it } }
-        is Body.FileRef -> chunks += body.src
-        Body.None -> Unit
+        return result.text
     }
-    val found = Regex("\\{\\{\\$[^}]+}}").findAll(chunks.joinToString("\n")).map { it.value }.toSet()
-    found.sorted().forEach { variable ->
-        notes += Note(
-            Severity.WARNING,
-            file,
-            request,
-            "Dynamic variable '$variable' was left unchanged.",
-            line,
-        )
+    val rewrittenBody = when (body) {
+        Body.None -> body
+        is Body.Raw -> body.copy(text = rewrite(body.text))
+        is Body.FileRef -> body.copy(src = rewrite(body.src))
+        is Body.UrlEncoded -> body.copy(fields = body.fields.map { (key, value) -> key to rewrite(value) })
+        is Body.Multipart -> body.copy(parts = body.parts.map { part ->
+            part.copy(text = part.text?.let(::rewrite), src = part.src?.let(::rewrite))
+        })
+        is Body.GraphQl -> body.copy(query = rewrite(body.query), variables = body.variables?.let(::rewrite))
     }
+    return RewrittenRequest(rewrite(url), headers.map { it.copy(value = rewrite(it.value)) }, rewrittenBody)
 }
