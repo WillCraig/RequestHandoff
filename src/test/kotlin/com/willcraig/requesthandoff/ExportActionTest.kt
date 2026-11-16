@@ -107,6 +107,48 @@ class ExportActionTest : BasePlatformTestCase() {
         }
     }
 
+    fun testInlinesASiblingScriptAndSkipsAnAbsolutePath() {
+        val outside = Files.createTempFile("requesthandoff-script", ".js")
+        Files.writeString(outside, "request.variables.set(\"secret\", \"leaked-script-value\");\n")
+        val http = myFixture.addFileToProject(
+            "root/users/create.http",
+            """
+            ### Create
+            < ./prepare.js
+            POST https://example.com/users
+
+            > ${outside.toAbsolutePath()}
+            """.trimIndent(),
+        )
+        myFixture.addFileToProject(
+            "root/users/prepare.js",
+            "request.variables.set(\"name\", \"Ada\");\n",
+        )
+        val outputDir = Files.createTempDirectory("requesthandoff-scripts")
+        try {
+            val root = http.virtualFile.parent.parent
+            val output = action.exportSelection(
+                project,
+                listOf(root),
+                outputDir,
+                includePrivate = false,
+                options = ExportOptions.fixed(),
+            )
+            assertNotNull(output)
+            output!!
+            assertTrue(output.collectionJson.contains("pm.variables.set(\\\"name\\\", \\\"Ada\\\");"))
+            assertTrue(output.collectionJson.contains("\"listen\": \"prerequest\""))
+            assertTrue(output.collectionJson.contains("\"listen\": \"test\""))
+            assertFalse(output.collectionJson.contains("leaked-script-value"))
+            assertFalse(output.reportMarkdown.contains("leaked-script-value"))
+            assertTrue(output.reportMarkdown.contains("was not found and was not inlined."))
+            assertFalse(output.reportMarkdown.contains("prepare.js uses unsupported"))
+        } finally {
+            outputDir.toFile().deleteRecursively()
+            Files.deleteIfExists(outside)
+        }
+    }
+
     fun testPrivateValuesAreWrittenOnlyWhenRequested() {
         val http = myFixture.addFileToProject("solo.http", "GET {{host}}/status\n")
         myFixture.addFileToProject(

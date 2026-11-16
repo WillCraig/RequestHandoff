@@ -13,6 +13,7 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.roots.ProjectRootManager
 import com.intellij.openapi.util.NlsContexts
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VfsUtilCore
@@ -23,6 +24,9 @@ import com.willcraig.requesthandoff.core.ExportOptions
 import com.willcraig.requesthandoff.core.ExportOutput
 import com.willcraig.requesthandoff.core.HttpFileInput
 import com.willcraig.requesthandoff.core.exportHttpFiles
+import com.willcraig.requesthandoff.core.httpScriptMayBeInlined
+import com.willcraig.requesthandoff.core.referencedHttpScripts
+import com.willcraig.requesthandoff.core.resolveHttpScriptPath
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.Path
@@ -160,15 +164,19 @@ class ExportAction : AnAction() {
                 httpFiles.putIfAbsent(relative, target)
             }
         }
+        val projectBase = projectDir(project)
+        val scripts = linkedMapOf<String, String>()
         val inputs = httpFiles.map { (relative, file) ->
-            try {
-                HttpFileInput(relative, VfsUtilCore.loadText(file))
+            val text = try {
+                VfsUtilCore.loadText(file)
             } catch (ex: java.io.IOException) {
-                HttpFileInput(relative, null, ex.message ?: "Could not read the file.")
+                return@map HttpFileInput(relative, null, ex.message ?: "Could not read the file.")
             }
+            loadScriptFiles(project, file, relative, text, scripts)
+            HttpFileInput(relative, text)
         }
         val start = if (targets.size == 1 && targets.first().isDirectory) targets.first() else targets.first().parent
-        val (publicFile, privateFile) = findEnvironmentFiles(start, projectDir(project))
+        val (publicFile, privateFile) = findEnvironmentFiles(start, projectBase)
         val collectionName = when {
             singleFile -> targets.first().nameWithoutExtension
             targets.size == 1 && targets.first().isDirectory -> targets.first().name
@@ -181,7 +189,30 @@ class ExportAction : AnAction() {
             publicEnvironmentJson = publicFile?.let { VfsUtilCore.loadText(it) },
             privateEnvironmentJson = if (includePrivate) privateFile?.let { VfsUtilCore.loadText(it) } else null,
             privateEnvironmentOmitted = !includePrivate && privateFile != null,
+            scriptFiles = scripts,
         )
+    }
+
+    private fun loadScriptFiles(
+        project: Project,
+        httpFile: VirtualFile,
+        relativePath: String,
+        text: String,
+        scripts: MutableMap<String, String>,
+    ) {
+        val parent = httpFile.parent ?: return
+        for (reference in referencedHttpScripts(text)) {
+            if (!httpScriptMayBeInlined(reference)) continue
+            val key = resolveHttpScriptPath(relativePath, reference)
+            if (key in scripts) continue
+            val child = findRelativeFile(parent, reference) ?: continue
+            if (child.isDirectory || !isInsideProject(project, child)) continue
+            try {
+                scripts[key] = VfsUtilCore.loadText(child)
+            } catch (_: java.io.IOException) {
+                // The exporter reports a script that was not inlined.
+            }
+        }
     }
 
     private fun suggestedDirectory(project: Project, targets: List<VirtualFile>): String {
@@ -228,6 +259,25 @@ class ExportAction : AnAction() {
         private const val NOTIFICATION_GROUP = "RequestHandoff.Notifications"
         private val SKIP_VCS = VirtualFileFilter { file -> file.name != ".git" }
     }
+}
+
+private fun isInsideProject(project: Project, file: VirtualFile): Boolean {
+    val roots = ProjectRootManager.getInstance(project).contentRoots
+    if (roots.any { VfsUtilCore.isAncestor(it, file, false) }) return true
+    val base = projectDir(project) ?: return false
+    return VfsUtilCore.isAncestor(base, file, false)
+}
+
+private fun findRelativeFile(start: VirtualFile, reference: String): VirtualFile? {
+    var current = start
+    for (segment in reference.trim().replace('\\', '/').split('/')) {
+        current = when (segment) {
+            "", "." -> current
+            ".." -> current.parent ?: return null
+            else -> current.findChild(segment) ?: return null
+        }
+    }
+    return current
 }
 
 private fun isHttp(file: VirtualFile): Boolean {
