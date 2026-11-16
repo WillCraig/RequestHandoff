@@ -81,12 +81,48 @@ Secret values are written only to `http-client.private.env.json`. They are not w
 | Multipart file parts and `< ./file` bodies | File `src` (the path as written). File bytes are not embedded. |
 | `X-REQUEST-TYPE: GraphQL` or the `GRAPHQL` method | `body.mode = graphql`. A JSON object after a blank line, or a JSON body with `query`, becomes GraphQL variables. |
 | Directories and `.http` / `.rest` files | Collection folders. |
+| Pre-request (`<`) and response-handler (`>`) scripts | Postman `prerequest` and `test` events. See [Scripts](#scripts). |
+
+## Scripts
+
+Inline `{% %}` scripts and script files that sit inside the project are translated to Postman `pm.*` where the [HTTP Client JavaScript API](https://www.jetbrains.com/help/idea/http-response-reference.html) has a documented Postman equivalent ([Postman sandbox](https://learning.postman.com/docs/tests-and-scripts/write-scripts/postman-sandbox-reference/)). A call with no safe equivalent is left as a comment on every line it spans, and the export report names that API once per script. The comment does not include the call's arguments.
+
+| HTTP Client | Postman |
+| --- | --- |
+| `client.test` | `pm.test` |
+| `client.assert(condition, message...)` | `pm.expect(condition, message...).to.eql(true)`. An empty assert expects `undefined`. |
+| `client.log` | `console.log` |
+| `client.global.set` / `get`, and the same methods on `client.variables.global` | `pm.globals.set` / `get` |
+| `client.global.clear(name)` | `pm.globals.unset(name)` |
+| `client.global.clearAll()` | `pm.globals.clear()` |
+| `client.global.isEmpty()` | `(Object.keys(pm.globals.toObject()).length === 0)`. Postman globals have no `isEmpty`. |
+| `request.environment.get` and `client.variables.environment.get` | `pm.environment.get`. Writes are left as comments. |
+| `client.variables.file.get` | `pm.collectionVariables.get`. File-scope `set` is left as a comment. |
+| `request.variables.set` / `get` and `client.variables.request.set` / `get` | `pm.variables.set` / `get`. `set` is a Postman local, so `{{name}}` in the request still resolves. `get` reads the narrowest Postman scope, which is broader than an HTTP Client per-request variable. |
+| `response.status` | `pm.response.code` (the numeric code). `pm.response.status` is the reason phrase and is not used. A call `response.status()` is left as a comment. |
+| `response.body` followed by `.` or `[` | `pm.response.json()`. A bare `response.body` (including `JSON.parse(response.body)`) becomes `pm.response.text()`. `response.body()` is not a function and is left as a comment. |
+| `response.headers.valueOf(name)` | `pm.response.headers.get(name)` |
+| `response.headers.valuesOf(name)` | A filter over `pm.response.headers` that compares header names case-insensitively. This does not use `headers.all()`, which returns a map. |
+| `response.contentType.mimeType` / `charset` | Read from the `Content-Type` header. |
+| `request.headers.findByName(name)` | `pm.request.headers.get(name)` |
+| `request.body.getRaw()` | `pm.request.body.toString()`, or `""` when there is no body. |
+| `request.body()`, `request.body.tryGetSubstituted()` | `pm.variables.replaceIn` of that body text. |
+| `request.url.getRaw()` | `pm.request.url.toString()` |
+| `request.url()`, `request.url.tryGetSubstituted()` | `pm.variables.replaceIn` of that URL. |
+| `request.method` | `pm.request.method` |
+| `request.iteration()` | `pm.info.iteration` |
+
+There is no documented `client.environment`. Unknown `client.*` members are left as comments. These also stay comments: `client.global.headers`, `client.exit`, `response.cookies`, `response.cookiesByName`, bare `response.headers` and `response.contentType`, `request.headers.all()`, `request.templateValue`, DOM traversal on `response.body` (`getElementById`, `onEachLine`, and the other document methods), `crypto`, `jwt`, `DOMParser`, `jsonPath(...)`, and the shell helpers `exec`, `execFile`, `execSync`, `execFileSync`, `spawn`, and `spawnSync` when they are called. `CryptoJS`, `URLSearchParams`, `btoa`, `atob`, and `console.log` are copied through. Dynamic variables such as `{{$uuid}}` are not part of this translation.
+
+The translator does not track JavaScript scope. A local or parameter named `client`, `response`, or `request` is still rewritten when it is followed by a known member. A bare `client`, `response`, or `request` is left alone, so `function (response)` keeps its parameter name.
+
+A script file is inlined only when its path is relative and the file is inside the project. A missing file, or an absolute, home, or drive path, stays in the event as one comment that names the path. The event is not dropped.
 
 ## Limitations
 
 v0.1 does not translate everything. The export report states these limits for every run, and lists anything in the selection that was skipped or only partly converted.
 
-- Response-handler scripts (`> {% %}` and `> ./script.js`) and pre-request scripts (`< {% %}` and `< ./script.js`) are **not** translated. Inline scripts are copied into the collection as commented-out script text. Script files are named in those comments and are not inlined.
+- Inline response-handler and pre-request scripts are translated to Postman `pm.*` where a documented equivalent exists. Calls without a safe equivalent are left as comments and listed in the export report. A script file is inlined when its text is available; a missing script file is named in a comment and is not dropped.
 - WebSocket and gRPC requests are skipped, with a warning in the report.
 - `Authorization` headers are copied as headers. Postman auth objects are not created.
 - Dynamic variables with no Postman equivalent are left unchanged. `{{$random.integer(from, to)}}` becomes `{{$randomInt}}` and loses its range. Host environment variables are not read.
@@ -108,7 +144,6 @@ Import uses that export surface in reverse. These extra limits apply:
 
 Not in this version:
 
-- Script translation from `client.*` to `pm.*`
 - Postman auth objects
 - Marketplace signing and publishing
 

@@ -20,6 +20,7 @@ data class ExportInput(
     val publicEnvironmentJson: String? = null,
     val privateEnvironmentJson: String? = null,
     val privateEnvironmentOmitted: Boolean = false,
+    val scriptFiles: Map<String, String> = emptyMap(),
 )
 
 data class ExportOptions(
