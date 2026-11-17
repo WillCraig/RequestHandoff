@@ -45,7 +45,7 @@ dependencies {
         zipSigner()
     }
     // Starter tests are JUnit 5 and run in a host JVM, not inside the light-test IDE.
-    "integrationTestImplementation"("org.junit.jupiter:junit-jupiter:5.11.4")
+    "integrationTestImplementation"("org.junit.jupiter:junit-jupiter:6.1.3")
     "integrationTestRuntimeOnly"("org.junit.platform:junit-platform-launcher")
 }
 
