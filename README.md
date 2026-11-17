@@ -1,8 +1,8 @@
 # RequestHandoff
 
-RequestHandoff is a free, open-source IntelliJ Platform tool that exports [JetBrains HTTP Client](https://www.jetbrains.com/help/idea/http-client-in-product-code-editor.html) `.http` and `.rest` files, folders of those files, and `http-client.env.json` environments.
+RequestHandoff is a free, open-source IntelliJ Platform tool that converts between [JetBrains HTTP Client](https://www.jetbrains.com/help/idea/http-client-in-product-code-editor.html) `.http` and `.rest` files and [Postman Collection v2.1](https://schema.getpostman.com/json/collection/v2.1.0/collection.json).
 
-It writes [Postman Collection v2.1](https://schema.getpostman.com/json/collection/v2.1.0/collection.json) JSON and one Postman environment file for each named environment. It parses request files itself and does not use the HTTP Client plugin, so it runs in every JetBrains IDE, including Community editions.
+It exports request files, folders of those files, and `http-client.env.json` environments, and imports a collection plus an optional Postman environment back to `.http` files. It parses request files itself and does not use the HTTP Client plugin, so it runs in every JetBrains IDE, including Community editions.
 
 Folder export and environment export are included at no cost.
 
@@ -10,7 +10,7 @@ Postman is a trademark of Postman, Inc. JetBrains and IntelliJ are trademarks of
 
 ## Install
 
-Marketplace install is a later milestone. For v0.1, build the plugin and install the zip from disk.
+Marketplace install waits on the JetBrains account and repository secrets. The [Publish](#publish) section lists those steps. For v0.1, build the plugin and install the zip from disk.
 
 Requirements: JDK 21 (Gradle can download it through the toolchain) and an IDE build `243` or newer (2024.3+).
 
@@ -41,9 +41,25 @@ To try it from sources:
 
 A single file becomes a collection whose requests sit at the top level. A folder becomes a collection of the same name: directories and request files become folders, and the requests inside each file stay in file order.
 
-The closest `http-client.env.json` between the selection and the project root is used. `http-client.private.env.json` is detected the same way, but its contents are not read unless you enable private values. Nested environment objects are flattened with dotted names (`auth.user`). Values that come from the private file are marked `secret` in the Postman environment.
+The closest `http-client.env.json` between the selection and the project root is used. `http-client.private.env.json` is detected the same way, but its contents are not read unless you enable private values. Nested environment objects are flattened with dotted names (`auth.user`). Values that come from the private file are marked `secret` in the Postman environment. Dynamic variables inside environment values are rewritten the same way as in requests. The report lists unmapped tokens and does not print environment values.
 
-`{{var}}` placeholders are kept as Postman variables. File-level `@name = value` lines become collection variables.
+`{{var}}` placeholders are kept as Postman variables. File-level `@name = value` lines become collection variables. Dynamic variables are rewritten when Postman has an equivalent (`{{$uuid}}` becomes `{{$guid}}`). `{{$env.NAME}}`, `{{$processEnv NAME}}`, and `{{$dotenv NAME}}` become `{{NAME}}`. The value on this machine is not copied.
+
+## Import
+
+1. Choose **Tools | Import with RequestHandoff**. The action is also on the Project view popup menu, and on the editor popup for a `.json` file.
+2. Choose a Postman Collection v2.1 JSON file. A Postman environment file is optional.
+3. Choose an output directory.
+4. Import writes:
+   - `.http` files. A folder of requests becomes one file. A folder that also contains folders becomes a directory.
+   - `http-client.env.json` for environment values that are not secrets. Dotted keys such as `auth.user` are nested, which is how HTTP Client reads `{{auth.user}}`.
+   - `http-client.private.env.json` when a Postman value is marked `secret`.
+   - `requestHandoff-import-report.md`
+5. A notification reports how many requests were imported, how many were skipped, and how many warnings were recorded. **Open report** opens the import report.
+
+Secret values are written only to `http-client.private.env.json`. They are not written to the public environment file, the import report, or logs. Disabled environment values are skipped. Keep the private file out of version control.
+
+`{{var}}` placeholders are kept. Collection variables become `@name = value` lines. A collection that becomes one `.http` file keeps those lines in that file. A collection that becomes several files puts them in `variables.http`. The `raw` URL is used when Postman provides one.
 
 ## Mapping
 
@@ -53,34 +69,83 @@ The closest `http-client.env.json` between the selection and the project root is
 | Method and URL | `request.method` and `url`, with the query string in `url.query`. `GRAPHQL` is sent as `POST`. |
 | Header lines | `request.header`. `Authorization` stays a header. |
 | `{{var}}` | Left as a Postman `{{var}}`. |
-| `@var = value` | Collection variable. |
+| `{{$uuid}}`, `{{$random.uuid}}` | `{{$guid}}`. Postman also documents `{{$randomUUID}}`; both are UUID values, and the export uses `{{$guid}}` because that entry is specified as uuid-v4. |
+| `{{$timestamp}}`, `{{$isoTimestamp}}`, `{{$randomInt}}` | The same names. |
+| `{{$random.integer}}` | `{{$randomInt}}`. With `(from, to)`, the HTTP Client range is not applied. Postman `$randomInt` is always an integer from 0 to 1000, and the report says so. |
+| `{{$random.email}}` and other `$random.*` helpers with a Postman equivalent | The matching `{{$random…}}` variable. Helpers with no equivalent, including `$random.alphabetic(length)`, `$random.alphanumeric(length)`, `$random.hexadecimal(length)`, `$random.float`, and `$exampleServer`, are left unchanged and listed in the report. |
+| `{{$env.NAME}}`, `{{$processEnv NAME}}`, `{{$dotenv NAME}}` | `{{NAME}}`. The host or dotenv value is not read. |
+| `@var = value` | Collection variable. Dynamic variables in the value are rewritten the same way. |
 | JSON, XML, HTML, and other text bodies | `body.mode = raw` with a language hint. |
 | `application/x-www-form-urlencoded` | `body.mode = urlencoded`. |
 | Multipart text parts | `formdata` text fields. |
 | Multipart file parts and `< ./file` bodies | File `src` (the path as written). File bytes are not embedded. |
 | `X-REQUEST-TYPE: GraphQL` or the `GRAPHQL` method | `body.mode = graphql`. A JSON object after a blank line, or a JSON body with `query`, becomes GraphQL variables. |
 | Directories and `.http` / `.rest` files | Collection folders. |
+| Pre-request (`<`) and response-handler (`>`) scripts | Postman `prerequest` and `test` events. See [Scripts](#scripts). |
+
+## Scripts
+
+Inline `{% %}` scripts and script files that sit inside the project are translated to Postman `pm.*` where the [HTTP Client JavaScript API](https://www.jetbrains.com/help/idea/http-response-reference.html) has a documented Postman equivalent ([Postman sandbox](https://learning.postman.com/docs/tests-and-scripts/write-scripts/postman-sandbox-reference/)). A call with no safe equivalent is left as a comment on every line it spans, and the export report names that API once per script. The comment does not include the call's arguments.
+
+| HTTP Client | Postman |
+| --- | --- |
+| `client.test` | `pm.test` |
+| `client.assert(condition, message...)` | `pm.expect(condition, message...).to.eql(true)`. An empty assert expects `undefined`. |
+| `client.log` | `console.log` |
+| `client.global.set` / `get`, and the same methods on `client.variables.global` | `pm.globals.set` / `get` |
+| `client.global.clear(name)` | `pm.globals.unset(name)` |
+| `client.global.clearAll()` | `pm.globals.clear()` |
+| `client.global.isEmpty()` | `(Object.keys(pm.globals.toObject()).length === 0)`. Postman globals have no `isEmpty`. |
+| `request.environment.get` and `client.variables.environment.get` | `pm.environment.get`. Writes are left as comments. |
+| `client.variables.file.get` | `pm.collectionVariables.get`. File-scope `set` is left as a comment. |
+| `request.variables.set` / `get` and `client.variables.request.set` / `get` | `pm.variables.set` / `get`. `set` is a Postman local, so `{{name}}` in the request still resolves. `get` reads the narrowest Postman scope, which is broader than an HTTP Client per-request variable. |
+| `response.status` | `pm.response.code` (the numeric code). `pm.response.status` is the reason phrase and is not used. A call `response.status()` is left as a comment. |
+| `response.body` followed by `.` or `[` | `pm.response.json()`. A bare `response.body` (including `JSON.parse(response.body)`) becomes `pm.response.text()`. `response.body()` is not a function and is left as a comment. |
+| `response.headers.valueOf(name)` | `pm.response.headers.get(name)` |
+| `response.headers.valuesOf(name)` | A filter over `pm.response.headers` that compares header names case-insensitively. This does not use `headers.all()`, which returns a map. |
+| `response.contentType.mimeType` / `charset` | Read from the `Content-Type` header. |
+| `request.headers.findByName(name)` | `pm.request.headers.get(name)` |
+| `request.body.getRaw()` | `pm.request.body.toString()`, or `""` when there is no body. |
+| `request.body()`, `request.body.tryGetSubstituted()` | `pm.variables.replaceIn` of that body text. |
+| `request.url.getRaw()` | `pm.request.url.toString()` |
+| `request.url()`, `request.url.tryGetSubstituted()` | `pm.variables.replaceIn` of that URL. |
+| `request.method` | `pm.request.method` |
+| `request.iteration()` | `pm.info.iteration` |
+
+There is no documented `client.environment`. Unknown `client.*` members are left as comments. These also stay comments: `client.global.headers`, `client.exit`, `response.cookies`, `response.cookiesByName`, bare `response.headers` and `response.contentType`, `request.headers.all()`, `request.templateValue`, DOM traversal on `response.body` (`getElementById`, `onEachLine`, and the other document methods), `crypto`, `jwt`, `DOMParser`, `jsonPath(...)`, and the shell helpers `exec`, `execFile`, `execSync`, `execFileSync`, `spawn`, and `spawnSync` when they are called. `CryptoJS`, `URLSearchParams`, `btoa`, `atob`, and `console.log` are copied through. Dynamic variables such as `{{$uuid}}` are not part of this translation.
+
+The translator does not track JavaScript scope. A local or parameter named `client`, `response`, or `request` is still rewritten when it is followed by a known member. A bare `client`, `response`, or `request` is left alone, so `function (response)` keeps its parameter name.
+
+A script file is inlined only when its path is relative and the file is inside the project. A missing file, or an absolute, home, or drive path, stays in the event as one comment that names the path. The event is not dropped.
 
 ## Limitations
 
 v0.1 does not translate everything. The export report states these limits for every run, and lists anything in the selection that was skipped or only partly converted.
 
-- Response-handler scripts (`> {% %}` and `> ./script.js`) and pre-request scripts (`< {% %}` and `< ./script.js`) are **not** translated. Inline scripts are copied into the collection as commented-out script text. Script files are named in those comments and are not inlined.
+- Inline response-handler and pre-request scripts are translated to Postman `pm.*` where a documented equivalent exists. Calls without a safe equivalent are left as comments and listed in the export report. A script file is inlined when its text is available; a missing script file is named in a comment and is not dropped.
 - WebSocket and gRPC requests are skipped, with a warning in the report.
 - `Authorization` headers are copied as headers. Postman auth objects are not created.
-- Dynamic variables such as `{{$uuid}}` are left unchanged.
+- Dynamic variables with no Postman equivalent are left unchanged. `{{$random.integer(from, to)}}` becomes `{{$randomInt}}` and loses its range. Host environment variables are not read.
 - `run` imports, response redirects (`>>`), saved response examples, and request flags such as `@no-log` are listed in the report and are not converted.
 - Private environment values are never written unless you explicitly enable them for that export. The report does not print those values.
+
+Import uses that export surface in reverse. These extra limits apply:
+
+- Scripts are copied into the `.http` file as comments. They are not turned into `< {% %}` or `> {% %}` blocks, and a later export does not recreate Postman events from those comments. `ImportMappings` in `core/.../ImportMappers.kt` is the hook for script translation.
+- Postman auth objects are reported and skipped. `Authorization` headers are kept. Collection and folder auth are not copied onto child requests. `ImportMappings` is the hook for auth objects.
+- Dynamic variables such as `{{$uuid}}` are left unchanged. `ImportMappings` is the hook for renaming them.
+- WebSocket and gRPC requests, saved examples, proxy settings, and client certificates are skipped and listed in the import report.
+- A multipart boundary is generated. The parts are preserved. `.rest` files come back as `.http`.
+- A single-file export has no folders, so import writes one file named after the collection. Root-level requests that share a collection with folders are written to `requests.http`.
+- GraphQL whose Postman method is POST is written with the `GRAPHQL` method. HTTP Client stores that as POST. A raw language hint becomes a `Content-Type` header when the request did not already have one.
+- Header order and trailing whitespace may differ. The `raw` URL is kept when it is present, so a disabled query parameter that is still inside `raw` stays in the URL.
 
 ## Later milestones
 
 Not in this version:
 
-- Script translation from `client.*` to `pm.*`
 - Postman auth objects
-- Dynamic variables (`$uuid` to `$guid`, and the rest)
-- Marketplace signing and publishing
-- Import-back / round-trip notes
+- Marketplace install (signing and the publish workflow are in the repo; the listing waits on the JetBrains account and repository secrets)
 
 ## Build
 
@@ -96,9 +161,9 @@ The plugin compiles against IntelliJ IDEA Community 2024.3 (`sinceBuild` 243) wi
 
 ## Tests
 
-Parser and exporter tests live in `:core`. They load `.http` / `.rest` fixtures (including a kitchen fixture with comments, variables, multi-line bodies, file references, headers, authorization, environments, GraphQL, and form/multipart data), compare the Postman Collection v2.1 JSON and environment JSON with golden files, and validate the collection against the vendored Postman schema. An in-test read-back checks that the exported JSON matches the parsed request model. v0.1 does not ship a Postman importer.
+Parser, exporter, and importer tests live in `:core`. They load `.http` / `.rest` fixtures (including a kitchen fixture with comments, variables, multi-line bodies, file references, headers, authorization, environments, GraphQL, and form/multipart data), compare the Postman Collection v2.1 JSON and environment JSON with golden files, and validate the collection against the vendored Postman schema. An in-test read-back checks that the exported JSON matches the parsed request model. The fidelity suite exports those samples and imports the result, then imports a representative collection (GraphQL, form and multipart, file refs, collection variables, WebSocket and gRPC) and exports it again. Comparisons allow header order, trailing whitespace, and a regenerated multipart boundary, and they fail on semantic drift. Secret Postman values are asserted to be absent from the public environment, the `.http` files, and the report.
 
-Light tests in the plugin module use `BasePlatformTestCase`. They cover action enablement, the export dialog (output directory, private values off by default), the written collection, environment, and `requestHandoff-report.md`, and the notification counts. They run headless inside Gradle and do not open a window.
+Light tests in the plugin module use `BasePlatformTestCase`. They cover action enablement, the export dialog (output directory, private values off by default), the import dialog (collection file, optional environment, output directory), the written collection, environment, and report files, and the notification counts. They run headless inside Gradle and do not open a window. The IDE Starter smoke test covers export. Import is covered by the light tests rather than a second IDE boot.
 
 `integrationTest` is separate and is not part of `build` or `test`. It uses the IDE Starter and Driver to boot IntelliJ IDEA Community 2024.3 with the built plugin, open a sample `.http` file, run **Export with RequestHandoff**, and assert the collection JSON. The Driver confirms the dialog with the OK button's `doClick`, because a Robot mouse click does not land when the session has no display. On Linux, Starter starts Xvfb when `DISPLAY` is unset. The first run downloads the IDE.
 
@@ -132,6 +197,79 @@ A stable verifier failure fails the workflow. An EAP failure does not. The EAP j
 The IDE release watch workflow runs every Monday and can be started with `workflow_dispatch`. It records the newest stable and EAP builds from the JetBrains releases API, runs the unit and light tests, and runs the stable and EAP verifier. Any failure opens or updates the same `needs-attention` issue. The workflow has `contents: read` and `issues: write`. Tokens are not written into the issue body.
 
 Dependabot checks Gradle (including the IntelliJ Platform Gradle Plugin and Kotlin) and GitHub Actions weekly.
+
+## Publish
+
+v0.1.0 has not been uploaded. The first Marketplace upload is manual. Later versions can use `publishPlugin`. Do not publish from a pull request. This repository does not contain the token or the signing key.
+
+Signing and publishing follow the IntelliJ Platform Gradle Plugin 2.x tasks [`signPlugin`](https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-tasks.html#signPlugin) and [`publishPlugin`](https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-tasks.html#publishPlugin). The extension properties are [`intellijPlatform.signing`](https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-extension.html#intellijPlatform-signing) and [`intellijPlatform.publishing`](https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-extension.html#intellijPlatform-publishing).
+
+`since-build` stays `243` (2024.3+). `until-build` is omitted. [Build number ranges](https://plugins.jetbrains.com/docs/intellij/build-number-ranges.html) treat a missing `until-build` as compatibility with future IDE builds. Marketplace does not require a closed range. [SuspiciousUntilBuild](https://plugins.jetbrains.com/docs/marketplace/list-of-common-errors-and-warnings.html) can be avoided by leaving the field empty when that open range is intentional. The plugin still depends only on `com.intellij.modules.platform`.
+
+### Secrets Will adds
+
+Create these on GitHub: `WillCraig/RequestHandoff` → Settings → Secrets and variables → Actions. Do not commit the values, and do not print them in logs.
+
+| GitHub secret | Gradle reads it as | Used for |
+| --- | --- | --- |
+| `JETBRAINS_MARKETPLACE_TOKEN` | environment variable of the same name | `publishPlugin` token. A permanent token from [Marketplace tokens](https://plugins.jetbrains.com/author/me/tokens). |
+| `CERTIFICATE_CHAIN` | environment variable of the same name | `signPlugin` certificate chain (`chain.crt`). PEM, or one-line Base64 of that PEM. |
+| `PRIVATE_KEY` | environment variable of the same name | `signPlugin` private key (`private.pem`). PEM, or one-line Base64 of that PEM. |
+| `PRIVATE_KEY_PASSWORD` | environment variable of the same name | Password for the encrypted private key. |
+
+The signing names match the [plugin signing](https://plugins.jetbrains.com/docs/intellij/plugin-signing.html) environment variables. `signPlugin` accepts a PEM or a one-line Base64 encoding of that PEM and decodes Base64 itself. `verifyPluginSignature` writes that property to a file without decoding, so a Base64 `CERTIFICATE_CHAIN` makes verification fail with "No certificate data found". To verify, put the PEM text in `CERTIFICATE_CHAIN`. Use Base64 for the GitHub secrets so the value stays one line:
+
+```bash
+openssl enc -A -base64 -in chain.crt
+openssl enc -A -base64 -in private.pem
+```
+
+For a local publish, any of these also supplies the token: `PUBLISH_TOKEN`, `-PintellijPlatformPublishingToken`, or `ORG_GRADLE_PROJECT_intellijPlatformPublishingToken`. The GitHub secret name is `JETBRAINS_MARKETPLACE_TOKEN`.
+
+### Generate a signing certificate
+
+Run this on your machine. Keep `private.pem` and `chain.crt` outside the repository.
+
+```bash
+openssl genpkey \
+  -aes-256-cbc \
+  -algorithm RSA \
+  -out private_encrypted.pem \
+  -pkeyopt rsa_keygen_bits:4096
+openssl rsa \
+  -in private_encrypted.pem \
+  -out private.pem
+openssl req \
+  -key private.pem \
+  -new \
+  -x509 \
+  -days 365 \
+  -out chain.crt
+```
+
+The password you type for `openssl genpkey` is `PRIVATE_KEY_PASSWORD`. `chain.crt` is `CERTIFICATE_CHAIN`. `private.pem` is `PRIVATE_KEY`.
+
+### What fails without secrets
+
+`./gradlew buildPlugin`, `./gradlew build`, and the Build workflow do not sign or publish.
+
+`./gradlew signPlugin` runs `checkMarketplaceSigning` first. If `CERTIFICATE_CHAIN`, `PRIVATE_KEY`, or `PRIVATE_KEY_PASSWORD` is missing, that task fails and names the missing variables. It does not print the values. With all three set, `signPlugin` writes `build/distributions/RequestHandoff-0.1.0-signed.zip`.
+
+`./gradlew publishPlugin` runs the same signing check and `checkMarketplaceToken`. A missing token fails with `JETBRAINS_MARKETPLACE_TOKEN` before anything is uploaded.
+
+The Publish workflow (`.github/workflows/publish.yml`) runs on `ubuntu-latest` only, from **Actions → Publish → Run workflow**, or from a tag such as `v0.1.0`. It does not run on pull requests. It builds the zip, then signs. Missing signing secrets fail that sign step and name the secrets. Tick **publish**, or push a `v*.*.*` tag, to run `publishPlugin`. A missing `JETBRAINS_MARKETPLACE_TOKEN` fails that step the same way.
+
+### Steps still left
+
+1. Create a JetBrains account and, on the first upload, a Marketplace vendor profile. Accept the Marketplace developer agreement. Declare trader or non-trader status.
+2. Generate the certificate above and create a permanent Marketplace token.
+3. Add the four secrets in the table.
+4. Run the Publish workflow with **publish** left off. Download the signed zip artifact.
+5. Upload that zip yourself: [JetBrains Marketplace](https://plugins.jetbrains.com/author/me) → Add new plugin. The [publishing docs](https://plugins.jetbrains.com/docs/intellij/publishing-plugin.html) require the first upload to be manual. `publishPlugin` only works after the plugin exists.
+6. Paste the description, change notes, and getting-started text from [docs/marketplace/listing.md](docs/marketplace/listing.md). Set the license to MIT and the source link to this repository. Add screenshots in the Media section (at least 1200×760). Confirm the vendor and the final wording.
+7. After that first version is approved, publish a later version with the workflow (**publish** on) or with a `v*.*.*` tag. Bump `version` in `gradle.properties` first. Marketplace rejects a second upload of the same version.
+
+Listing assets already in the repo: `src/main/resources/META-INF/pluginIcon.svg`, `pluginIcon_dark.svg`, the `plugin.xml` description and change notes, and [docs/marketplace/listing.md](docs/marketplace/listing.md).
 
 ## License
 

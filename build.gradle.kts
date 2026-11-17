@@ -1,3 +1,11 @@
+import org.gradle.api.DefaultTask
+import org.gradle.api.GradleException
+import org.gradle.api.provider.ListProperty
+import org.gradle.api.provider.MapProperty
+import org.gradle.api.provider.Property
+import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.Optional
+import org.gradle.api.tasks.TaskAction
 import org.jetbrains.intellij.platform.gradle.IntelliJPlatformType
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
 import org.jetbrains.intellij.platform.gradle.models.ProductRelease
@@ -33,6 +41,8 @@ dependencies {
         testFramework(TestFrameworkType.Platform)
         // Starter pulls the IDE Starter and Driver jars that match this platform build.
         testFramework(TestFrameworkType.Starter, configurationName = "integrationTestImplementation")
+        // Marketplace ZIP Signer CLI used by signPlugin. Not packaged into the plugin.
+        zipSigner()
     }
     // Starter tests are JUnit 5 and run in a host JVM, not inside the light-test IDE.
     "integrationTestImplementation"("org.junit.jupiter:junit-jupiter:5.11.4")
@@ -52,6 +62,20 @@ intellijPlatform {
             sinceBuild = "243"
             untilBuild = provider { null }
         }
+    }
+
+    // Defaults in the Gradle plugin are the same env vars. Set them here so a blank
+    // value counts as absent: signPlugin then skips, and the check tasks below fail
+    // with the secret name instead of handing an empty PEM to the signer.
+    signing {
+        certificateChain = envIfPresent("CERTIFICATE_CHAIN")
+        privateKey = envIfPresent("PRIVATE_KEY")
+        password = envIfPresent("PRIVATE_KEY_PASSWORD")
+    }
+    publishing {
+        token = envIfPresent("JETBRAINS_MARKETPLACE_TOKEN")
+            .orElse(envIfPresent("PUBLISH_TOKEN"))
+            .orElse(providers.gradleProperty("intellijPlatformPublishingToken").filter { it.isNotBlank() })
     }
     pluginVerification {
         // recommended() would also queue every minor release, RC, and EAP since 243
@@ -100,6 +124,45 @@ intellijPlatform {
 
 tasks.named<Test>("test") {
     useJUnit()
+    systemProperty("requestHandoff.projectDir", rootDir.absolutePath)
+}
+
+val marketplaceSigningSecrets = listOf("CERTIFICATE_CHAIN", "PRIVATE_KEY", "PRIVATE_KEY_PASSWORD")
+
+fun envIfPresent(name: String) = providers.environmentVariable(name).filter { it.isNotBlank() }
+
+fun envPresent(name: String) = envIfPresent(name).map { true }.orElse(false)
+
+// signPlugin skips when the key or certificate is absent. These tasks run first and name what is missing.
+tasks.register<RequireMarketplaceCredentials>("checkMarketplaceSigning") {
+    group = "publishing"
+    description = "Fails when CERTIFICATE_CHAIN, PRIVATE_KEY, or PRIVATE_KEY_PASSWORD is absent."
+    names.set(marketplaceSigningSecrets)
+    marketplaceSigningSecrets.forEach { name -> presence.put(name, envPresent(name)) }
+    guidance.set("Generate the certificate with the commands in the README Publish section. Do not commit the key or certificate.")
+}
+
+tasks.register<RequireMarketplaceCredentials>("checkMarketplaceToken") {
+    group = "publishing"
+    description = "Fails when the JetBrains Marketplace token is absent."
+    names.set(listOf("JETBRAINS_MARKETPLACE_TOKEN"))
+    presence.put(
+        "JETBRAINS_MARKETPLACE_TOKEN",
+        envPresent("JETBRAINS_MARKETPLACE_TOKEN")
+            .zip(envPresent("PUBLISH_TOKEN")) { marketplace, publish -> marketplace || publish }
+            .zip(providers.gradleProperty("intellijPlatformPublishingToken").map { it.isNotBlank() }.orElse(false)) { env, property ->
+                env || property
+            },
+    )
+    guidance.set("Local alternatives: PUBLISH_TOKEN, or -PintellijPlatformPublishingToken / ORG_GRADLE_PROJECT_intellijPlatformPublishingToken.")
+}
+
+tasks.named("signPlugin").configure {
+    dependsOn("checkMarketplaceSigning")
+}
+
+tasks.named("publishPlugin").configure {
+    dependsOn("checkMarketplaceSigning", "checkMarketplaceToken")
 }
 
 intellijPlatformTesting {
@@ -121,4 +184,30 @@ intellijPlatformTesting {
 tasks.matching { it.name == "integrationTest" }.configureEach {
     group = "verification"
     description = "Boots a real IDE with the built plugin and exports a sample project."
+}
+
+abstract class RequireMarketplaceCredentials : DefaultTask() {
+    @get:Input
+    abstract val names: ListProperty<String>
+
+    @get:Input
+    abstract val presence: MapProperty<String, Boolean>
+
+    @get:Input
+    @get:Optional
+    abstract val guidance: Property<String>
+
+    @TaskAction
+    fun check() {
+        val missing = names.get().filter { name -> presence.get()[name] != true }
+        if (missing.isEmpty()) {
+            return
+        }
+        val extra = guidance.orNull?.let { " $it" }.orEmpty()
+        throw GradleException(
+            "Missing Marketplace credentials: ${missing.joinToString(", ")}. " +
+                "Set each name as an environment variable or as a GitHub Actions secret of the same name. " +
+                "Values are not printed.$extra See the README Publish section.",
+        )
+    }
 }
