@@ -7,6 +7,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.test.fail
 
@@ -56,10 +57,17 @@ class KitchenFixtureTest {
         assertEquals(parsed.map { it.name }.toSet(), readBack.map { it.name }.toSet())
         parsed.forEach { request ->
             val exported = readBack.single { it.name == request.name }
+            val bearer = request.headers.filter { it.isBearerCredential() }
             assertEquals(request.method, exported.method)
             assertEquals(request.url, exported.rawUrl)
-            assertEquals(request.headers.map { it.name to it.value }, exported.headers)
+            assertEquals(request.headers.filterNot { it in bearer }.map { it.name to it.value }, exported.headers)
             assertEquals(bodyMode(request.body), exported.bodyMode)
+            if (bearer.isEmpty()) {
+                assertNull(exported.auth)
+            } else {
+                assertEquals("bearer", exported.auth?.type)
+                assertEquals(bearer.first().value.trim().substringAfter(' '), exported.auth?.attributes?.get("token"))
+            }
         }
         val graph = readBack.single { it.name == "Graph" }
         assertEquals("POST", graph.method)
@@ -91,13 +99,19 @@ class KitchenFixtureTest {
     }
 }
 
+private data class ReadBackAuth(val type: String, val attributes: Map<String, String>)
+
 private data class ReadBackRequest(
     val name: String,
     val method: String,
     val rawUrl: String,
     val headers: List<Pair<String, String>>,
     val bodyMode: String?,
+    val auth: ReadBackAuth?,
 )
+
+private fun Header.isBearerCredential(): Boolean =
+    name.equals("Authorization", ignoreCase = true) && value.trim().startsWith("Bearer ", ignoreCase = true)
 
 private data class ReadBackValue(val value: String, val type: String)
 
@@ -140,7 +154,20 @@ private fun readRequest(name: String, request: Jv.Obj): ReadBackRequest {
         rawUrl = url.fields.getValue("raw").str(),
         headers = headers,
         bodyMode = body?.fields?.get("mode")?.str(),
+        auth = readAuth(request),
     )
+}
+
+private fun readAuth(request: Jv.Obj): ReadBackAuth? {
+    val auth = request.fields["auth"] as? Jv.Obj ?: return null
+    val type = auth.fields.getValue("type").str()
+    val params = auth.fields[type] as? Jv.Arr ?: return ReadBackAuth(type, emptyMap())
+    val attributes = params.items.mapNotNull { item ->
+        val obj = item as Jv.Obj
+        val value = obj.fields["value"] as? Jv.Str ?: return@mapNotNull null
+        obj.fields.getValue("key").str() to value.value
+    }.toMap()
+    return ReadBackAuth(type, attributes)
 }
 
 private fun scriptLines(collectionJson: String, requestName: String): List<String> {
