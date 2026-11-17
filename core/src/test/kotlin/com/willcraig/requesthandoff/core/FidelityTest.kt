@@ -13,6 +13,10 @@ import kotlin.test.assertTrue
  * header order, trailing whitespace, multipart boundary strings, `.rest` rewritten as `.http`,
  * and a POST GraphQL request written with the `GRAPHQL` method (the parser stores it as POST).
  * Script events, Postman auth objects, and dynamic-variable names are not part of the v0.1 mapping.
+ * In particular the exporter turns mappable `Authorization` headers into Postman auth objects
+ * and the importer does not import auth objects, so `Authorization` is excluded from the
+ * request-shape comparisons below; auth export itself is covered by AuthMapperTest and
+ * KitchenFixtureTest.
  */
 class FidelityTest {
     @Test
@@ -37,6 +41,7 @@ class FidelityTest {
                 environmentFileName = exported.environments.single().fileName,
             ),
         )
+        assertTrue(exported.collectionJson.contains("\"type\": \"bearer\""))
         assertEquals(exported.requestsExported, imported.requestsImported)
         assertEquals(semantics(files), semantics(imported.files.map { HttpFileInput(it.relativePath, it.content) }))
         assertEquals(setOf("host", "token"), variables(imported.files.map { HttpFileInput(it.relativePath, it.content) }).keys)
@@ -83,7 +88,9 @@ class FidelityTest {
             ImportInput(collection, "api.postman_collection.json", environment, "dev.postman_environment.json"),
         )
         assertTrue(imported.files.joinToString("\n") { it.content }.contains("pm.variables.set"))
-        val again = exportImported(imported, "api")
+        // The golden environment's `token` entry is typed `secret`, so import splits it into
+        // the private environment; re-export must include private values to preserve it.
+        val again = exportImported(imported, "api", includePrivate = true)
         CollectionSchema.assertValid(again.collectionJson)
         assertEquals(postmanRequests(collection), postmanRequests(again.collectionJson))
         assertEquals(environmentValues(environment), environmentValues(again.environments.single().json))
@@ -128,6 +135,7 @@ class FidelityTest {
         CollectionSchema.assertValid(again.collectionJson)
         assertTrue(again.collectionJson.contains("{{${'$'}guid}}"))
         assertFalse(again.collectionJson.contains("{{${'$'}uuid}}"))
+        assertTrue(again.collectionJson.contains("\"type\": \"bearer\""))
         assertEquals(postmanRequests(REPRESENTATIVE), postmanRequests(again.collectionJson))
         val values = environmentValues(again.environments.single().json)
         assertEquals("https://local.example" to "default", values.getValue("host"))
@@ -210,7 +218,7 @@ class FidelityTest {
     private fun stem(path: String): String = path.removeSuffix(".http").removeSuffix(".rest")
 
     private fun normalizeHeaders(headers: List<Header>): List<Pair<String, String>> =
-        headers.map { header ->
+        headers.filterNot { it.name.equals("Authorization", ignoreCase = true) }.map { header ->
             val value = if (header.name.equals("Content-Type", ignoreCase = true) &&
                 header.value.lowercase().contains("multipart/form-data")
             ) {
