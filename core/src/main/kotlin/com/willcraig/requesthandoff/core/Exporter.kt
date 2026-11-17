@@ -25,13 +25,35 @@ fun exportHttpFiles(input: ExportInput, options: ExportOptions = ExportOptions.r
     parsed.forEach { notes += it.second.notes }
 
     val variables = mergeVariables(parsed, notes)
+    val authContext = AuthContext.from(input.publicEnvironmentJson, input.privateEnvironmentJson, input.privateEnvironmentOmitted)
     val requests = parsed.flatMap { (path, model) -> model.requests.map { path to it } }
-    val items = if (input.singleFile) {
-        arr(requests.map { requestItem(it.first, it.second, input.scriptFiles, notes) })
-    } else {
-        renderTree(requests, input.scriptFiles, notes)
+    val mapped = requests.map { (path, request) ->
+        val result = authContext.map(path, request)
+        if (result.consumedAuthCalls.isNotEmpty()) {
+            notes.removeAll { note ->
+                note.file == path &&
+                    note.request == request.name &&
+                    result.consumedAuthCalls.any { call ->
+                        note.message == "Dynamic variable '$call' has no Postman equivalent and was left unchanged." &&
+                            !requestContains(result.request, call)
+                    }
+            }
+        }
+        notes += result.notes
+        path to ExportRequest(result.request, result.auth)
     }
-    val environments = buildEnvironments(input, options, notes)
+    notes += authContext.finish(variables.map { it.first }.toSet())
+    val items = if (input.singleFile) {
+        arr(mapped.map { (path, exported) -> requestItem(path, exported, input.scriptFiles, notes) })
+    } else {
+        renderTree(mapped, input.scriptFiles, notes)
+    }
+    val environments = buildEnvironments(input, options, notes, authContext.placeholderNames)
+    val exportedVariables = if (environments.isEmpty()) {
+        variables + authContext.placeholderNames.filter { name -> variables.none { it.first == name } }.map { it to "" }
+    } else {
+        variables
+    }
     val collection = obj {
         put(
             "info",
@@ -43,10 +65,10 @@ fun exportHttpFiles(input: ExportInput, options: ExportOptions = ExportOptions.r
             },
         )
         put("item", items)
-        if (variables.isNotEmpty()) {
+        if (exportedVariables.isNotEmpty()) {
             put(
                 "variable",
-                arr(variables.map { (key, value) ->
+                arr(exportedVariables.map { (key, value) ->
                     obj {
                         put("key", key)
                         put("value", value)
@@ -106,13 +128,15 @@ private fun mergeVariables(
     return values.entries.map { it.key to it.value }
 }
 
+private data class ExportRequest(val request: HttpRequest, val auth: Jv.Obj?)
+
 private class Folder {
     val children = linkedMapOf<String, Folder>()
-    val requests = mutableListOf<Pair<String, HttpRequest>>()
+    val requests = mutableListOf<Pair<String, ExportRequest>>()
 }
 
 private fun renderTree(
-    requests: List<Pair<String, HttpRequest>>,
+    requests: List<Pair<String, ExportRequest>>,
     scriptFiles: Map<String, String>,
     notes: MutableList<Note>,
 ): Jv.Arr {
@@ -149,10 +173,11 @@ private fun renderFolder(
 
 private fun requestItem(
     httpFile: String,
-    request: HttpRequest,
+    exported: ExportRequest,
     scriptFiles: Map<String, String>,
     notes: MutableList<Note>,
 ): Jv.Obj = obj {
+    val request = exported.request
     put("name", request.name)
     val events = scriptEvents(httpFile, request, scriptFiles, notes)
     if (events.isNotEmpty()) put("event", arr(events))
@@ -160,6 +185,7 @@ private fun requestItem(
         "request",
         obj {
             put("method", request.method)
+            if (exported.auth != null) put("auth", exported.auth)
             if (request.headers.isNotEmpty()) {
                 put("header", arr(request.headers.map { header ->
                     obj {
@@ -310,6 +336,7 @@ private fun buildEnvironments(
     input: ExportInput,
     options: ExportOptions,
     notes: MutableList<Note>,
+    placeholders: List<String>,
 ): List<EnvironmentOutput> {
     val public = readEnvironments(input.publicEnvironmentJson, "http-client.env.json", notes)
     val private = readEnvironments(input.privateEnvironmentJson, "http-client.private.env.json", notes)
@@ -329,6 +356,11 @@ private fun buildEnvironments(
         val values = linkedMapOf<String, Pair<String, Boolean>>()
         public[name].orEmpty().forEach { (key, value) -> values[key] = value to false }
         private[name].orEmpty().forEach { (key, value) -> values[key] = value to true }
+        if (input.privateEnvironmentOmitted) {
+            placeholders.forEach { key ->
+                if (key !in values) values[key] = "" to true
+            }
+        }
         val fileName = uniqueEnvironmentFile(name, used)
         EnvironmentOutput(name, fileName, render(environmentDocument(name, values, options)))
     }
@@ -392,7 +424,11 @@ private fun readEnvironments(
     return environments
 }
 
-private fun flattenEnvironment(value: Jv.Obj, file: String, notes: MutableList<Note>): List<Pair<String, String>> {
+internal fun flattenEnvironment(
+    value: Jv.Obj,
+    file: String = "",
+    notes: MutableList<Note> = mutableListOf(),
+): List<Pair<String, String>> {
     val out = mutableListOf<Pair<String, String>>()
     val seen = linkedSetOf<String>()
     fun walk(prefix: String, node: Jv) {
@@ -423,6 +459,19 @@ private fun flattenEnvironment(value: Jv.Obj, file: String, notes: MutableList<N
     return out
 }
 
+private fun requestContains(request: HttpRequest, text: String): Boolean {
+    if (text in request.url) return true
+    if (request.headers.any { text in it.value }) return true
+    return when (val body = request.body) {
+        Body.None -> false
+        is Body.Raw -> text in body.text
+        is Body.FileRef -> text in body.src
+        is Body.UrlEncoded -> body.fields.any { text in it.second }
+        is Body.Multipart -> body.parts.any { part -> text in part.text.orEmpty() || text in part.src.orEmpty() }
+        is Body.GraphQl -> text in body.query || text in body.variables.orEmpty()
+    }
+}
+
 private fun renderReport(
     exported: Int,
     skipped: Int,
@@ -439,7 +488,7 @@ private fun renderReport(
     append("These limits apply to every v0.1 export:\n\n")
     append("- Inline response-handler and pre-request scripts are translated to Postman `pm.*` where a documented equivalent exists. Calls without a safe equivalent are left as comments and listed in this report. A script file is inlined when its text is available; a missing script file is named in a comment and is not dropped.\n")
     append("- WebSocket and gRPC requests are skipped.\n")
-    append("- Authorization headers are copied as headers. Postman auth objects are not created.\n")
+    append("- Basic, Bearer, Digest, and API key credentials, and OAuth 2.0 references, are exported as Postman auth objects. The matching Authorization header or API key field is omitted so Postman does not send it twice. Unrecognized Authorization schemes stay headers. Access tokens are not acquired or refreshed.\n")
     append("- Dynamic variables with a Postman equivalent are rewritten (`{{${'$'}uuid}}` becomes `{{${'$'}guid}}`). Unmapped dynamic variables are left unchanged and listed below. `{{${'$'}random.integer(from, to)}}` becomes `{{${'$'}randomInt}}`, which ignores that range. Host environment variables (`{{${'$'}env.NAME}}`, `{{${'$'}processEnv NAME}}`, and `{{${'$'}dotenv NAME}}`) are not read.\n\n")
     append("## Skipped requests\n\n")
     append(section(notes.filter { it.severity == Severity.SKIPPED }))
