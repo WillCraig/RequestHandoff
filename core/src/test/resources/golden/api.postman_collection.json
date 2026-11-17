@@ -50,9 +50,7 @@
                   "script": {
                     "type": "text/javascript",
                     "exec": [
-                      "// RequestHandoff v0.1.0 does not translate HTTP Client scripts.",
-                      "// Original pre-request script:",
-                      "// request.variables.set(\"name\", \"Ada\");"
+                      "pm.variables.set(\"name\", \"Ada\");"
                     ]
                   }
                 }

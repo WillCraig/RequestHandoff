@@ -97,7 +97,7 @@ class DynamicVariablesTest {
         assertTrue(body.contains("\"span\": {{${'$'}randomInt}}"))
         assertTrue(body.contains("\"letters\": \"{{${'$'}random.alphabetic(8)}}\""))
         val exec = scriptLines(output)
-        assertTrue(exec.any { it.contains("${'$'}random.uuid") && it.trim().startsWith("//") })
+        assertTrue(exec.any { it.contains("${'$'}random.uuid") && !it.trim().startsWith("//") })
         assertTrue(exec.none { it.contains("${'$'}guid") })
         assertTrue(output.reportMarkdown.contains("{{${'$'}random.alphabetic(8)}}"))
         assertTrue(output.reportMarkdown.contains("{{${'$'}random.integer(3, 9)}}"))

@@ -44,9 +44,9 @@ fun exportHttpFiles(input: ExportInput, options: ExportOptions = ExportOptions.r
     }
     notes += authContext.finish(variables.map { it.first }.toSet())
     val items = if (input.singleFile) {
-        arr(mapped.map { requestItem(it.second) })
+        arr(mapped.map { (path, exported) -> requestItem(path, exported, input.scriptFiles, notes) })
     } else {
-        renderTree(mapped)
+        renderTree(mapped, input.scriptFiles, notes)
     }
     val environments = buildEnvironments(input, options, notes, authContext.placeholderNames)
     val exportedVariables = if (environments.isEmpty()) {
@@ -132,10 +132,14 @@ private data class ExportRequest(val request: HttpRequest, val auth: Jv.Obj?)
 
 private class Folder {
     val children = linkedMapOf<String, Folder>()
-    val requests = mutableListOf<ExportRequest>()
+    val requests = mutableListOf<Pair<String, ExportRequest>>()
 }
 
-private fun renderTree(requests: List<Pair<String, ExportRequest>>): Jv.Arr {
+private fun renderTree(
+    requests: List<Pair<String, ExportRequest>>,
+    scriptFiles: Map<String, String>,
+    notes: MutableList<Note>,
+): Jv.Arr {
     val root = Folder()
     for ((path, request) in requests) {
         val parts = path.split('/').filter { it.isNotEmpty() }
@@ -145,28 +149,37 @@ private fun renderTree(requests: List<Pair<String, ExportRequest>>): Jv.Arr {
             node = node.children.getOrPut(directory) { Folder() }
         }
         val fileNode = node.children.getOrPut(fileStem(parts.last())) { Folder() }
-        fileNode.requests += request
+        fileNode.requests += path to request
     }
-    return renderFolder(root)
+    return renderFolder(root, scriptFiles, notes)
 }
 
-private fun renderFolder(folder: Folder): Jv.Arr {
+private fun renderFolder(
+    folder: Folder,
+    scriptFiles: Map<String, String>,
+    notes: MutableList<Note>,
+): Jv.Arr {
     val items = mutableListOf<Jv>()
     for (name in folder.children.keys.sorted()) {
         val child = folder.children.getValue(name)
         items += obj {
             put("name", name)
-            put("item", renderFolder(child))
+            put("item", renderFolder(child, scriptFiles, notes))
         }
     }
-    folder.requests.forEach { items += requestItem(it) }
+    folder.requests.forEach { (path, request) -> items += requestItem(path, request, scriptFiles, notes) }
     return arr(items)
 }
 
-private fun requestItem(exported: ExportRequest): Jv.Obj = obj {
+private fun requestItem(
+    httpFile: String,
+    exported: ExportRequest,
+    scriptFiles: Map<String, String>,
+    notes: MutableList<Note>,
+): Jv.Obj = obj {
     val request = exported.request
     put("name", request.name)
-    val events = scriptEvents(request)
+    val events = scriptEvents(httpFile, request, scriptFiles, notes)
     if (events.isNotEmpty()) put("event", arr(events))
     put(
         "request",
@@ -237,33 +250,86 @@ private fun bodyJson(body: Body): Jv? = when (body) {
     }
 }
 
-private fun scriptEvents(request: HttpRequest): List<Jv> {
+private fun scriptEvents(
+    httpFile: String,
+    request: HttpRequest,
+    scriptFiles: Map<String, String>,
+    notes: MutableList<Note>,
+): List<Jv> {
     val events = mutableListOf<Jv>()
-    request.preRequestScripts.forEach { events += scriptEvent("prerequest", it, "pre-request script") }
-    request.responseScripts.forEach { events += scriptEvent("test", it, "response handler") }
+    request.preRequestScripts.forEach { script ->
+        events += scriptEvent(httpFile, request, script, "prerequest", "Pre-request script", scriptFiles, notes)
+    }
+    request.responseScripts.forEach { script ->
+        events += scriptEvent(httpFile, request, script, "test", "Response handler script", scriptFiles, notes)
+    }
     return events
 }
 
-private fun scriptEvent(listen: String, script: ScriptSource, label: String): Jv = obj {
+private fun scriptEvent(
+    httpFile: String,
+    request: HttpRequest,
+    script: ScriptSource,
+    listen: String,
+    label: String,
+    scriptFiles: Map<String, String>,
+    notes: MutableList<Note>,
+): Jv = obj {
     put("listen", listen)
     put("script", obj {
         put("type", "text/javascript")
-        put("exec", arr(commentLines(script, label).map { Jv.Str(it) }))
+        put("exec", arr(scriptLines(httpFile, request, script, label, scriptFiles, notes).map { Jv.Str(it) }))
     })
 }
 
-private fun commentLines(script: ScriptSource, label: String): List<String> {
-    val lines = mutableListOf("// RequestHandoff v$VERSION does not translate HTTP Client scripts.")
-    if (script.file != null) {
-        lines += "// Original $label file (not inlined): ${script.file}"
-    }
-    if (script.inline != null) {
-        lines += "// Original $label:"
-        script.inline.lineSequence().forEach { line ->
-            lines += if (line.isEmpty()) "//" else "// $line"
+private fun scriptLines(
+    httpFile: String,
+    request: HttpRequest,
+    script: ScriptSource,
+    label: String,
+    scriptFiles: Map<String, String>,
+    notes: MutableList<Note>,
+): List<String> {
+    val fileRef = script.file
+    val source = if (fileRef != null) {
+        if (!httpScriptMayBeInlined(fileRef)) {
+            return missingScript(notes, httpFile, request, label, fileRef)
         }
+        val loaded = scriptFiles[resolveHttpScriptPath(httpFile, fileRef)]
+        if (loaded == null) return missingScript(notes, httpFile, request, label, fileRef)
+        loaded
+    } else {
+        script.inline.orEmpty()
     }
-    return lines
+    val translation = translateHttpClientScript(source)
+    val where = if (fileRef == null) label else "$label $fileRef"
+    translation.unsupportedApis.forEach { api ->
+        notes += Note(
+            Severity.WARNING,
+            httpFile,
+            request.name,
+            "$where uses unsupported HTTP Client API '$api'. That call was left as a comment.",
+            request.line,
+        )
+    }
+    return translation.lines
+}
+
+private fun missingScript(
+    notes: MutableList<Note>,
+    httpFile: String,
+    request: HttpRequest,
+    label: String,
+    fileRef: String,
+): List<String> {
+    notes += Note(
+        Severity.WARNING,
+        httpFile,
+        request.name,
+        "$label file '$fileRef' was not found and was not inlined.",
+        request.line,
+    )
+    return listOf("// RequestHandoff: script file '$fileRef' was not found and was not inlined.")
 }
 
 private fun buildEnvironments(
@@ -420,7 +486,7 @@ private fun renderReport(
     append("Warnings: $warnings\n\n")
     append("## Limitations\n\n")
     append("These limits apply to every v0.1 export:\n\n")
-    append("- Response-handler and pre-request scripts are not translated. Inline scripts are copied into the collection as commented-out script text. Script files are named in those comments and are not inlined.\n")
+    append("- Inline response-handler and pre-request scripts are translated to Postman `pm.*` where a documented equivalent exists. Calls without a safe equivalent are left as comments and listed in this report. A script file is inlined when its text is available; a missing script file is named in a comment and is not dropped.\n")
     append("- WebSocket and gRPC requests are skipped.\n")
     append("- Basic, Bearer, Digest, and API key credentials, and OAuth 2.0 references, are exported as Postman auth objects. The matching Authorization header or API key field is omitted so Postman does not send it twice. Unrecognized Authorization schemes stay headers. Access tokens are not acquired or refreshed.\n")
     append("- Dynamic variables with a Postman equivalent are rewritten (`{{${'$'}uuid}}` becomes `{{${'$'}guid}}`). Unmapped dynamic variables are left unchanged and listed below. `{{${'$'}random.integer(from, to)}}` becomes `{{${'$'}randomInt}}`, which ignores that range. Host environment variables (`{{${'$'}env.NAME}}`, `{{${'$'}processEnv NAME}}`, and `{{${'$'}dotenv NAME}}`) are not read.\n\n")

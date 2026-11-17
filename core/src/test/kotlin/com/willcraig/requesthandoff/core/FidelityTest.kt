@@ -49,7 +49,7 @@ class FidelityTest {
             environmentValues(exported.environments.single().json),
             environmentValues(reexportEnvironment(imported.publicEnvironmentJson)),
         )
-        assertTrue(imported.files.joinToString("\n") { it.content }.contains("request.variables.set"))
+        assertTrue(imported.files.joinToString("\n") { it.content }.contains("pm.variables.set"))
         assertFalse(imported.reportMarkdown.contains("test-private-token"))
         roundTripCollection(imported, "kitchen")
     }
@@ -87,7 +87,7 @@ class FidelityTest {
         val imported = importPostmanCollection(
             ImportInput(collection, "api.postman_collection.json", environment, "dev.postman_environment.json"),
         )
-        assertTrue(imported.files.joinToString("\n") { it.content }.contains("request.variables.set"))
+        assertTrue(imported.files.joinToString("\n") { it.content }.contains("pm.variables.set"))
         // The golden environment's `token` entry is typed `secret`, so import splits it into
         // the private environment; re-export must include private values to preserve it.
         val again = exportImported(imported, "api", includePrivate = true)
