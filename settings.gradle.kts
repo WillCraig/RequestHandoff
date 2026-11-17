@@ -4,7 +4,7 @@ rootProject.name = "RequestHandoff"
 
 pluginManagement {
     plugins {
-        kotlin("jvm") version "2.0.21"
+        kotlin("jvm") version "2.4.21"
         id("org.jetbrains.intellij.platform") version "2.20.1"
     }
 }
