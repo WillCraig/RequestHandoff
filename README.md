@@ -10,7 +10,7 @@ Postman is a trademark of Postman, Inc. JetBrains and IntelliJ are trademarks of
 
 ## Install
 
-Marketplace install is a later milestone. For v0.1, build the plugin and install the zip from disk.
+Marketplace install waits on the JetBrains account and repository secrets. The [Publish](#publish) section lists those steps. For v0.1, build the plugin and install the zip from disk.
 
 Requirements: JDK 21 (Gradle can download it through the toolchain) and an IDE build `243` or newer (2024.3+).
 
@@ -110,7 +110,7 @@ Not in this version:
 
 - Script translation from `client.*` to `pm.*`
 - Postman auth objects
-- Marketplace signing and publishing
+- Marketplace install (signing and the publish workflow are in the repo; the listing waits on the JetBrains account and repository secrets)
 
 ## Build
 
@@ -162,6 +162,79 @@ A stable verifier failure fails the workflow. An EAP failure does not. The EAP j
 The IDE release watch workflow runs every Monday and can be started with `workflow_dispatch`. It records the newest stable and EAP builds from the JetBrains releases API, runs the unit and light tests, and runs the stable and EAP verifier. Any failure opens or updates the same `needs-attention` issue. The workflow has `contents: read` and `issues: write`. Tokens are not written into the issue body.
 
 Dependabot checks Gradle (including the IntelliJ Platform Gradle Plugin and Kotlin) and GitHub Actions weekly.
+
+## Publish
+
+v0.1.0 has not been uploaded. The first Marketplace upload is manual. Later versions can use `publishPlugin`. Do not publish from a pull request. This repository does not contain the token or the signing key.
+
+Signing and publishing follow the IntelliJ Platform Gradle Plugin 2.x tasks [`signPlugin`](https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-tasks.html#signPlugin) and [`publishPlugin`](https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-tasks.html#publishPlugin). The extension properties are [`intellijPlatform.signing`](https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-extension.html#intellijPlatform-signing) and [`intellijPlatform.publishing`](https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-extension.html#intellijPlatform-publishing).
+
+`since-build` stays `243` (2024.3+). `until-build` is omitted. [Build number ranges](https://plugins.jetbrains.com/docs/intellij/build-number-ranges.html) treat a missing `until-build` as compatibility with future IDE builds. Marketplace does not require a closed range. [SuspiciousUntilBuild](https://plugins.jetbrains.com/docs/marketplace/list-of-common-errors-and-warnings.html) can be avoided by leaving the field empty when that open range is intentional. The plugin still depends only on `com.intellij.modules.platform`.
+
+### Secrets Will adds
+
+Create these on GitHub: `WillCraig/RequestHandoff` → Settings → Secrets and variables → Actions. Do not commit the values, and do not print them in logs.
+
+| GitHub secret | Gradle reads it as | Used for |
+| --- | --- | --- |
+| `JETBRAINS_MARKETPLACE_TOKEN` | environment variable of the same name | `publishPlugin` token. A permanent token from [Marketplace tokens](https://plugins.jetbrains.com/author/me/tokens). |
+| `CERTIFICATE_CHAIN` | environment variable of the same name | `signPlugin` certificate chain (`chain.crt`). PEM, or one-line Base64 of that PEM. |
+| `PRIVATE_KEY` | environment variable of the same name | `signPlugin` private key (`private.pem`). PEM, or one-line Base64 of that PEM. |
+| `PRIVATE_KEY_PASSWORD` | environment variable of the same name | Password for the encrypted private key. |
+
+The signing names match the [plugin signing](https://plugins.jetbrains.com/docs/intellij/plugin-signing.html) environment variables. `signPlugin` accepts a PEM or a one-line Base64 encoding of that PEM and decodes Base64 itself. `verifyPluginSignature` writes that property to a file without decoding, so a Base64 `CERTIFICATE_CHAIN` makes verification fail with "No certificate data found". To verify, put the PEM text in `CERTIFICATE_CHAIN`. Use Base64 for the GitHub secrets so the value stays one line:
+
+```bash
+openssl enc -A -base64 -in chain.crt
+openssl enc -A -base64 -in private.pem
+```
+
+For a local publish, any of these also supplies the token: `PUBLISH_TOKEN`, `-PintellijPlatformPublishingToken`, or `ORG_GRADLE_PROJECT_intellijPlatformPublishingToken`. The GitHub secret name is `JETBRAINS_MARKETPLACE_TOKEN`.
+
+### Generate a signing certificate
+
+Run this on your machine. Keep `private.pem` and `chain.crt` outside the repository.
+
+```bash
+openssl genpkey \
+  -aes-256-cbc \
+  -algorithm RSA \
+  -out private_encrypted.pem \
+  -pkeyopt rsa_keygen_bits:4096
+openssl rsa \
+  -in private_encrypted.pem \
+  -out private.pem
+openssl req \
+  -key private.pem \
+  -new \
+  -x509 \
+  -days 365 \
+  -out chain.crt
+```
+
+The password you type for `openssl genpkey` is `PRIVATE_KEY_PASSWORD`. `chain.crt` is `CERTIFICATE_CHAIN`. `private.pem` is `PRIVATE_KEY`.
+
+### What fails without secrets
+
+`./gradlew buildPlugin`, `./gradlew build`, and the Build workflow do not sign or publish.
+
+`./gradlew signPlugin` runs `checkMarketplaceSigning` first. If `CERTIFICATE_CHAIN`, `PRIVATE_KEY`, or `PRIVATE_KEY_PASSWORD` is missing, that task fails and names the missing variables. It does not print the values. With all three set, `signPlugin` writes `build/distributions/RequestHandoff-0.1.0-signed.zip`.
+
+`./gradlew publishPlugin` runs the same signing check and `checkMarketplaceToken`. A missing token fails with `JETBRAINS_MARKETPLACE_TOKEN` before anything is uploaded.
+
+The Publish workflow (`.github/workflows/publish.yml`) runs on `ubuntu-latest` only, from **Actions → Publish → Run workflow**, or from a tag such as `v0.1.0`. It does not run on pull requests. It builds the zip, then signs. Missing signing secrets fail that sign step and name the secrets. Tick **publish**, or push a `v*.*.*` tag, to run `publishPlugin`. A missing `JETBRAINS_MARKETPLACE_TOKEN` fails that step the same way.
+
+### Steps still left
+
+1. Create a JetBrains account and, on the first upload, a Marketplace vendor profile. Accept the Marketplace developer agreement. Declare trader or non-trader status.
+2. Generate the certificate above and create a permanent Marketplace token.
+3. Add the four secrets in the table.
+4. Run the Publish workflow with **publish** left off. Download the signed zip artifact.
+5. Upload that zip yourself: [JetBrains Marketplace](https://plugins.jetbrains.com/author/me) → Add new plugin. The [publishing docs](https://plugins.jetbrains.com/docs/intellij/publishing-plugin.html) require the first upload to be manual. `publishPlugin` only works after the plugin exists.
+6. Paste the description, change notes, and getting-started text from [docs/marketplace/listing.md](docs/marketplace/listing.md). Set the license to MIT and the source link to this repository. Add screenshots in the Media section (at least 1200×760). Confirm the vendor and the final wording.
+7. After that first version is approved, publish a later version with the workflow (**publish** on) or with a `v*.*.*` tag. Bump `version` in `gradle.properties` first. Marketplace rejects a second upload of the same version.
+
+Listing assets already in the repo: `src/main/resources/META-INF/pluginIcon.svg`, `pluginIcon_dark.svg`, the `plugin.xml` description and change notes, and [docs/marketplace/listing.md](docs/marketplace/listing.md).
 
 ## License
 
