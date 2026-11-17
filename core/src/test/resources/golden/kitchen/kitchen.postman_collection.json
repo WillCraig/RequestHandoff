@@ -210,9 +210,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// RequestHandoff v0.1.0 does not translate HTTP Client scripts.",
-                  "// Original pre-request script:",
-                  "// request.variables.set(\"userId\", \"1\");"
+                  "pm.variables.set(\"userId\", \"1\");"
                 ]
               }
             },
@@ -221,8 +219,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// RequestHandoff v0.1.0 does not translate HTTP Client scripts.",
-                  "// Original response handler file (not inlined): ./check.js"
+                  "// RequestHandoff: script file './check.js' was not found and was not inlined."
                 ]
               }
             }
@@ -258,13 +255,13 @@
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{host}}/id/{{$uuid}}",
+              "raw": "{{host}}/id/{{$guid}}",
               "host": [
                 "{{host}}"
               ],
               "path": [
                 "id",
-                "{{$uuid}}"
+                "{{$guid}}"
               ]
             }
           }

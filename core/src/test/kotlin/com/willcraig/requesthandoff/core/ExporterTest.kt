@@ -61,7 +61,7 @@ class ExporterTest {
         assertEquals("json", ((body.fields.getValue("options") as Jv.Obj).fields.getValue("raw") as Jv.Obj).fields.getValue("language").str())
         assertTrue(output.reportMarkdown.contains("Request flag '@no-log' was not converted."))
         assertTrue(output.reportMarkdown.contains("WebSocket and gRPC requests are skipped."))
-        assertTrue(output.reportMarkdown.contains("not translated"))
+        assertTrue(output.reportMarkdown.contains("left as comments"))
     }
 
     @Test
@@ -187,20 +187,81 @@ class ExporterTest {
         assertTrue(graphql.fields.getValue("variables").str().contains("{{userId}}"))
         val events = (graphItem.fields.getValue("event") as Jv.Arr).items.map { it as Jv.Obj }
         assertEquals(listOf("prerequest", "test"), events.map { it.fields.getValue("listen").str() })
-        val exec = events.flatMap { ((it.fields.getValue("script") as Jv.Obj).fields.getValue("exec") as Jv.Arr).items.map { line -> line.str() } }
-        assertTrue(exec.any { it.contains("request.variables.set") && it.trim().startsWith("//") })
-        assertTrue(exec.any { it.contains("client.test") && it.trim().startsWith("//") })
-        assertTrue(exec.none { it.contains("client.test") && !it.trim().startsWith("//") })
+        assertEquals(
+            listOf(
+                "pm.variables.set(\"userId\", \"1\");",
+                "pm.test(\"created\", function() {",
+                "  pm.expect(pm.response.code === 200).to.eql(true);",
+                "});",
+            ),
+            events.flatMap { execOf(it) },
+        )
 
         val url = requestOf(items[5]).fields.getValue("url") as Jv.Obj
-        assertTrue(url.fields.getValue("raw").str().contains("{{${'$'}uuid}}"))
+        assertTrue(url.fields.getValue("raw").str().contains("{{${'$'}guid}}"))
+        assertFalse(url.fields.getValue("raw").str().contains("{{${'$'}uuid}}"))
         assertTrue(output.reportMarkdown.contains("WebSocket requests are skipped"))
         assertTrue(output.reportMarkdown.contains("gRPC requests are skipped"))
         assertTrue(output.reportMarkdown.contains("Import 'run ./auth.http' was not converted."))
         assertTrue(output.reportMarkdown.contains("Response output redirect"))
-        assertTrue(output.reportMarkdown.contains("Dynamic variable '{{${'$'}uuid}}' was left unchanged."))
-        assertTrue(output.reportMarkdown.contains("Pre-request script was not translated"))
-        assertTrue(output.reportMarkdown.contains("Response handler script was not translated"))
+        assertFalse(output.reportMarkdown.contains("Dynamic variable '{{${'$'}uuid}}' has no Postman equivalent"))
+        assertFalse(output.reportMarkdown.contains("was not translated"))
+        assertFalse(output.reportMarkdown.contains("uses unsupported"))
+    }
+
+    @Test
+    fun translatesFileScriptsAndWarnsWhenAFileIsMissing() {
+        val output = exportHttpFiles(
+            ExportInput(
+                collectionName = "requests",
+                singleFile = true,
+                files = listOf(
+                    HttpFileInput(
+                        "users/create.http",
+                        """
+                        ### Create
+                        < ./prepare.js
+                        POST https://example.com/users
+                        > ./missing.js
+                        """.trimIndent(),
+                    ),
+                ),
+                scriptFiles = mapOf("users/prepare.js" to "request.variables.set(\"id\", client.log(1));\nclient.exit();\n"),
+            ),
+            ExportOptions.fixed(),
+        )
+        CollectionSchema.assertValid(output.collectionJson)
+        val item = firstItem(output)
+        val events = (item.fields.getValue("event") as Jv.Arr).items.map { it as Jv.Obj }
+        assertEquals(listOf("prerequest", "test"), events.map { it.fields.getValue("listen").str() })
+        assertEquals(
+            listOf(
+                "pm.variables.set(\"id\", console.log(1));",
+                "// Unsupported HTTP Client API client.exit: client.exit();",
+                "// RequestHandoff: script file './missing.js' was not found and was not inlined.",
+            ),
+            events.flatMap { execOf(it) },
+        )
+        assertTrue(output.reportMarkdown.contains("Pre-request script ./prepare.js uses unsupported HTTP Client API 'client.exit'. That call was left as a comment."))
+        assertTrue(output.reportMarkdown.contains("Response handler script file './missing.js' was not found and was not inlined."))
+        assertFalse(output.reportMarkdown.contains("leaked"))
+    }
+
+    @Test
+    fun doesNotInlineAnAbsoluteScriptPathFromTheScriptMap() {
+        val output = exportHttpFiles(
+            ExportInput(
+                collectionName = "requests",
+                singleFile = true,
+                files = listOf(HttpFileInput("requests.http", "< /tmp/check.js\nGET https://example.com\n")),
+                scriptFiles = mapOf("tmp/check.js" to "request.variables.set(\"x\", \"leaked-script-value\");"),
+            ),
+            ExportOptions.fixed(),
+        )
+        assertFalse(output.collectionJson.contains("leaked-script-value"))
+        assertFalse(output.collectionJson.contains("pm.variables.set"))
+        assertTrue(output.reportMarkdown.contains("Pre-request script file '/tmp/check.js' was not found and was not inlined."))
+        assertTrue(output.collectionJson.contains("script file '/tmp/check.js' was not found and was not inlined."))
     }
 
     @Test
@@ -334,6 +395,9 @@ class ExporterTest {
     private fun firstItem(output: ExportOutput): Jv.Obj = items(output).first() as Jv.Obj
 
     private fun requestOf(item: Jv): Jv.Obj = (item as Jv.Obj).fields.getValue("request") as Jv.Obj
+
+    private fun execOf(event: Jv.Obj): List<String> =
+        ((event.fields.getValue("script") as Jv.Obj).fields.getValue("exec") as Jv.Arr).items.map { it.str() }
 
     private fun Jv.str(): String = assertIs<Jv.Str>(this).value
 }
