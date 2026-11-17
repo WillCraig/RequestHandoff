@@ -249,7 +249,6 @@ private fun parseBlock(file: String, block: Block): BlockResult {
             requestLine.number,
         )
     }
-    scriptNotes(file, displayName, requestLine.number, preScripts, responseScripts, notes)
     val rewritten = rewriteRequestFields(file, displayName, requestLine.number, url, headers, body, notes)
     val exportedName = explicitName ?: fallbackName(exportMethod, rewritten.url)
 
@@ -503,34 +502,6 @@ private fun parameter(header: String, name: String): String? {
     val pattern = Regex("""(?:^|;)\s*""" + Regex.escape(name) + """\s*=\s*(?:"([^"]*)"|([^;\s]+))""")
     val match = pattern.find(header) ?: return null
     return match.groupValues[1].ifEmpty { match.groupValues[2] }.ifEmpty { null }
-}
-
-private fun scriptNotes(
-    file: String,
-    request: String,
-    line: Int,
-    pre: List<ScriptSource>,
-    response: List<ScriptSource>,
-    notes: MutableList<Note>,
-) {
-    if (pre.isNotEmpty()) {
-        notes += Note(
-            Severity.WARNING,
-            file,
-            request,
-            "Pre-request script was not translated and is included as comments.",
-            line,
-        )
-    }
-    if (response.isNotEmpty()) {
-        notes += Note(
-            Severity.WARNING,
-            file,
-            request,
-            "Response handler script was not translated and is included as comments.",
-            line,
-        )
-    }
 }
 
 private data class RewrittenRequest(val url: String, val headers: List<Header>, val body: Body)

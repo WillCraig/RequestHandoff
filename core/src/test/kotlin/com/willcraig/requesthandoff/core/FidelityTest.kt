@@ -44,7 +44,7 @@ class FidelityTest {
             environmentValues(exported.environments.single().json),
             environmentValues(reexportEnvironment(imported.publicEnvironmentJson)),
         )
-        assertTrue(imported.files.joinToString("\n") { it.content }.contains("request.variables.set"))
+        assertTrue(imported.files.joinToString("\n") { it.content }.contains("pm.variables.set"))
         assertFalse(imported.reportMarkdown.contains("test-private-token"))
         roundTripCollection(imported, "kitchen")
     }
@@ -82,7 +82,7 @@ class FidelityTest {
         val imported = importPostmanCollection(
             ImportInput(collection, "api.postman_collection.json", environment, "dev.postman_environment.json"),
         )
-        assertTrue(imported.files.joinToString("\n") { it.content }.contains("request.variables.set"))
+        assertTrue(imported.files.joinToString("\n") { it.content }.contains("pm.variables.set"))
         val again = exportImported(imported, "api")
         CollectionSchema.assertValid(again.collectionJson)
         assertEquals(postmanRequests(collection), postmanRequests(again.collectionJson))
