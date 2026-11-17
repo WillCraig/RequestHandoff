@@ -10,7 +10,7 @@ These limits apply to every v0.1 export:
 
 - Inline response-handler and pre-request scripts are translated to Postman `pm.*` where a documented equivalent exists. Calls without a safe equivalent are left as comments and listed in this report. A script file is inlined when its text is available; a missing script file is named in a comment and is not dropped.
 - WebSocket and gRPC requests are skipped.
-- Authorization headers are copied as headers. Postman auth objects are not created.
+- Basic, Bearer, Digest, and API key credentials, and OAuth 2.0 references, are exported as Postman auth objects. The matching Authorization header or API key field is omitted so Postman does not send it twice. Unrecognized Authorization schemes stay headers. Access tokens are not acquired or refreshed.
 - Dynamic variables with a Postman equivalent are rewritten (`{{$uuid}}` becomes `{{$guid}}`). Unmapped dynamic variables are left unchanged and listed below. `{{$random.integer(from, to)}}` becomes `{{$randomInt}}`, which ignores that range. Host environment variables (`{{$env.NAME}}`, `{{$processEnv NAME}}`, and `{{$dotenv NAME}}`) are not read.
 
 ## Skipped requests
