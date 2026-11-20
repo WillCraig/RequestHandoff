@@ -34,6 +34,12 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: true
+          cache-cleanup: on-success
+          gradle-home-cache-excludes: |
+            caches/modules-2/files-2.1/com.jetbrains.intellij*
+            caches/transforms-*
 
       - name: Record the newest JetBrains builds
         run: |
