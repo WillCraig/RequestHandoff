@@ -33,6 +33,12 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+          cache-cleanup: on-success
+          gradle-home-cache-excludes: |
+            caches/modules-2/files-2.1/com.jetbrains.intellij*
+            caches/transforms-*
 
       - name: Build and test
         run: ./gradlew build test --stacktrace
@@ -63,6 +69,12 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: true
+          cache-cleanup: on-success
+          gradle-home-cache-excludes: |
+            caches/modules-2/files-2.1/com.jetbrains.intellij*
+            caches/transforms-*
 
       # Starter launches the IDE with `xvfb-run` when DISPLAY is unset.
       # ubuntu-latest does not ship xvfb-run, which made the first CI smoke test fail.
@@ -108,6 +120,12 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: true
+          cache-cleanup: on-success
+          gradle-home-cache-excludes: |
+            caches/modules-2/files-2.1/com.jetbrains.intellij*
+            caches/transforms-*
 
       - name: Verify sinceBuild 243 and latest stable IDEs
         run: ./gradlew verifyPlugin --stacktrace
@@ -145,6 +163,12 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: true
+          cache-cleanup: on-success
+          gradle-home-cache-excludes: |
+            caches/modules-2/files-2.1/com.jetbrains.intellij*
+            caches/transforms-*
 
       - name: Verify latest EAP IDEs
         id: eap
