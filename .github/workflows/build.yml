@@ -55,6 +55,8 @@ jobs:
       - name: Free disk space
         uses: jlumbroso/free-disk-space@v2.0.0
         with:
+          # apt removals in large-packages are the slow part; docker-images and android free enough for IDE jobs.
+          large-packages: false
           tool-cache: false
           preinstalled-runtimes: false
           swap-storage: false
@@ -105,6 +107,7 @@ jobs:
       - name: Free disk space
         uses: jlumbroso/free-disk-space@v2.0.0
         with:
+          large-packages: false
           tool-cache: false
           preinstalled-runtimes: false
           swap-storage: false
@@ -147,6 +150,7 @@ jobs:
       - name: Free disk space
         uses: jlumbroso/free-disk-space@v2.0.0
         with:
+          large-packages: false
           tool-cache: false
           preinstalled-runtimes: false
           swap-storage: false
