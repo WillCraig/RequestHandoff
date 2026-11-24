@@ -17,7 +17,7 @@ dependencies {
     testImplementation(kotlin("stdlib"))
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
-    testImplementation("com.networknt:json-schema-validator:1.5.6")
+    testImplementation("com.networknt:json-schema-validator:3.0.9")
 }
 
 tasks.test {
